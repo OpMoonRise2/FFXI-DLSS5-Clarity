@@ -1,0 +1,5 @@
+dist/
+*.dll
+*.exe
+*.addon32
+*.addon64
