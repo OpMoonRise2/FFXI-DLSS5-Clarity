@@ -7,7 +7,7 @@ FFXI is a 2002 32-bit Direct3D 8 game with no DLSS of its own. This package wire
 existing community work (credited in [CREDITS.md](CREDITS.md)) and adds a patched OptiScaler build
 that fixes the problems we hit on FFXI:
 
-| Problem | Fix (in the [OptiScaler_DLSSNR `ffxi-clarity` fork](https://github.com/OpMoonRise2/OptiScaler_DLSSNR/tree/ffxi-clarity)) |
+| Problem | Fix (in the [OptiScaler_DLSSNR `ffxi-clarity` fork](https://github.com/OpMoonRise2/OptiScaler_DLSSNR/tree/v1.1.0-ffxi)) |
 |---|---|
 | Everything smears while the camera moves | **Prevent DLAA motion smearing**: DLAA's history is reset every frame while neural rendering keeps its own |
 | One neural pass is too subtle | **Neural passes 1-3**, each pass with its own history, refining the previous pass's result |
