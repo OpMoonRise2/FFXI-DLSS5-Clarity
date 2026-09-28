@@ -21,11 +21,17 @@ Assert (Test-Path "$f\host64\nvngx.dll_dlssnr.dll") 'fresh: forwarder installed 
 Assert (Test-Path "$f\ReshadeEffectShaderToggler.addon32") 'fresh: shader toggler installed'
 Assert (Test-Path "$f\presets\Clarity-Lumenite-Strong.ini") 'fresh: lighting preset installed'
 $ini = Get-Content -Raw "$f\host64\OptiScaler.ini"
-Assert ($ini -match 'ResetDlaaHistory=true' -and $ini -match 'Passes=1' -and $ini -match 'PassTaper=0.5') 'fresh: motion fix + pass defaults written'
+Assert ($ini -match 'ResetDlaaHistory=true' -and $ini -match '(?m)^\[DlssNr\]') 'fresh: motion fix + neural section written'
+Assert ($ini -match '(?m)^\s*ShortcutKey\s*=\s*0x75' -and $ini.Length -gt 10000) 'fresh: full tested OptiScaler.ini installed (F6 menu key)'
+Assert ((Get-Content -Raw "$f\host64\ReShade.ini") -match '(?m)^KeyOverlay=36,') 'fresh: helper ReShade.ini installed with [INPUT]'
+$cfg = Get-Content -Raw "$f\dlss5-feed.cfg"
+Assert ($cfg -notmatch '(\r?\n){2}' -and !$cfg.StartsWith("`r`n") -and $cfg.EndsWith("`r`n")) 'fresh: cfg has no blank lines and ends with a newline'
+Assert ($cfg -match '(?m)^work_sharpness=0.61\r?$' -and $cfg -match '(?m)^hold_tolerance=0.020\r?$') 'fresh: tested cfg keys written'
 $rs = Get-Content -Raw "$f\ReShade.ini"
 Assert ($rs -match 'FilterResolutionWidth=4096' -and $rs -match 'UseAspectRatioHeuristics=4') 'fresh: depth filter written'
 Assert ($rs -notmatch '[A-Z]:\\') 'fresh: ReShade.ini has no absolute paths'
 Assert (($out -join "`n") -match 'Optional lighting pack not installed') 'fresh: missing lighting pack reported'
+Assert ((Get-Content -Raw "$f\dlss5-feed.cfg") -match '(?m)^host_window=1') 'fresh: helper window visible (host_window=1)'
 $bk = (Get-ChildItem $f -Directory -Filter 'FFXI-Clarity-backup-*').FullName
 & $setup -Action Restore -Target $f -Backup $bk | Out-Null
 Assert (!(Test-Path "$f\host64\winmm.dll")) 'fresh: restore removes added DLL'
@@ -36,6 +42,17 @@ $e = Fixture 'existing loader'
 [IO.File]::WriteAllText("$e\ReShade.ini", "[GENERAL]`r`nPresetPath=.\mine.ini`r`n[DEPTH]`r`nFilterResolutionWidth=2048`r`nFilterResolutionHeight=2048`r`n")
 & $setup -Action Install -Target $e | Out-Null
 Assert ((Get-Content -Raw "$e\host64\OptiScaler.ini") -match 'Intensity=1.234') 'existing: tuning kept'
+Assert (!(Test-Path "$e\FFXI-Clarity-backup-*\host64\ReShade.ini")) 'existing: no host ReShade.ini existed, none backed up'
+
+# 2b. 1.1.0 regression: a cfg with no trailing newline must not glue keys together
+$g = Fixture 'glued cfg'
+[IO.File]::WriteAllText("$g\dlss5-feed.cfg", "enabled=1`r`nwork_upscale=0host_window=1`r`nwork_sharpness=0.40")
+[IO.File]::WriteAllText("$g\host64\ReShade.ini", "[INPUT]`r`nKeyOverlay=35,0,0,0`r`n")
+& $setup -Action Install -Target $g | Out-Null
+$cfg = Get-Content -Raw "$g\dlss5-feed.cfg"
+Assert ($cfg -match '(?m)^work_upscale=0\r?$' -and $cfg -match '(?m)^host_window=1\r?$' -and $cfg -notmatch '0host_window') 'glued cfg: every key on its own line'
+Assert ($cfg -match '(?m)^work_sharpness=0.40\r?$' -and $cfg.EndsWith("`r`n")) 'glued cfg: user value kept, newline-terminated'
+Assert ((Get-Content -Raw "$g\host64\ReShade.ini") -match 'KeyOverlay=35') 'existing helper ReShade.ini kept'
 $rs = Get-Content -Raw "$e\ReShade.ini"
 Assert ($rs -match 'PresetPath=.\\mine.ini' -and $rs -match 'FilterResolutionWidth=2048') 'existing: preset and user depth filter kept'
 

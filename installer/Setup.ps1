@@ -54,7 +54,7 @@ if(Test-Path -LiteralPath $existingShaders){
     }
 }
 $runtime=@{}
-# The neural forwarder ships in payload (GPL, built from the fork); NVIDIA's two runtimes are user-supplied.
+# The neural forwarder ships in payload (GPL, the tested 2026-09-20 build; see tools\known-good.json); NVIDIA's two runtimes are user-supplied.
 foreach($name in @('nvngx_dlss.dll','nvngx_dlssnr.dll')){
     $installed=SafePath $root ('host64\'+$name);$supplied=Join-Path $PSScriptRoot ('Dependencies\'+$name)
     if(Test-Path -LiteralPath $installed){$runtime[$name]=$installed}elseif(Test-Path -LiteralPath $supplied){$runtime[$name]=$supplied}else{$problems.Add("Supply Dependencies\$name (see START-HERE.txt)")}
@@ -93,13 +93,23 @@ $changes=@{}
 $payload=Join-Path $PSScriptRoot 'payload'
 foreach($e in $manifest.Files.PSObject.Properties){if($e.Name.StartsWith('payload\')){if($reuseShaders -and $e.Name.StartsWith('payload\ffxi-clarity-shaders\')){continue};$rel=$e.Name.Substring(8);if($preserveWrappers.ContainsKey($rel)){continue};$dest=SafePath $root $rel;if(!(Test-Path -LiteralPath $dest) -or (Hash $dest) -ne $e.Value){$changes[$rel]=@{Source=(Join-Path $PSScriptRoot $e.Name)}}}}
 foreach($n in $runtime.Keys){$rel='host64\'+$n;if(!(Test-Path -LiteralPath (SafePath $root $rel))){$changes[$rel]=@{Source=$runtime[$n]}}}
+# Tested configuration (defaults\): used whole when the file is missing, never over an existing one.
+$defaults=Join-Path $PSScriptRoot 'defaults'
 $opti=ReadText (SafePath $root 'host64\OptiScaler.ini')
-if(!$opti){$opti="[DlssNr]`r`nEnabled=true`r`nPasses=1`r`nPassTaper=0.5`r`nWorkingScale=0.71`r`nTransferStrength=1.0`r`nColourStrength=1.0`r`nMaxRatio=1.6`r`nScanExposure=false`r`n[Upscalers]`r`nDx12Upscaler=dlss`r`n"}
+if(!$opti){$opti=ReadText (Join-Path $defaults 'OptiScaler.ini')}
 $opti=SetIni $opti 'DLSS' 'ResetDlaaHistory' 'true';$opti=SetIni $opti 'DlssNr' 'Enabled' 'true'
 $changes['host64\OptiScaler.ini']=@{Text=$opti}
-$cfg=ReadText (SafePath $root 'dlss5-feed.cfg')
-foreach($item in @('enabled=1','mode=2','reset_every=0','async_home=0','hold_strength=0.000','mv_scale_x=1.000','mv_scale_y=1.000','work_resolution=100','work_upscale=0')){$key=$item.Split('=')[0];if($cfg -match ('(?m)^'+$key+'=')){$cfg=[regex]::Replace($cfg,'(?m)^'+$key+'=[^\r\n]*',$item)}else{$cfg+="`r`n$item"}}
-$changes['dlss5-feed.cfg']=@{Text=$cfg}
+# The helper writes a bare ReShade.ini (no [INPUT]) when it finds none; ship the tested one instead.
+if(!(Test-Path -LiteralPath (SafePath $root 'host64\ReShade.ini'))){$changes['host64\ReShade.ini']=@{Text=(ReadText (Join-Path $defaults 'host64-ReShade.ini'))}}
+# dlss5-feed.cfg: one key=value per line, CRLF-terminated, so a later hand edit or append cannot glue two keys.
+# Forced keys are what the fixes need; every other tested key is added only if absent (host_window=1 keeps
+# the helper window, where F6 opens OptiScaler, and Ctrl+F9 casts it into the game).
+$cfgLines=[Collections.Generic.List[string]]::new()
+foreach($l in ((ReadText (SafePath $root 'dlss5-feed.cfg')) -split '\r?\n')){if($l.Trim()){$cfgLines.Add($l.Trim())}}
+function CfgSet([string]$item,[bool]$force){$key=$item.Split('=')[0];for($i=0;$i -lt $cfgLines.Count;$i++){if($cfgLines[$i] -match ('^'+[regex]::Escape($key)+'=')){if($force){$cfgLines[$i]=$item};return}};$cfgLines.Add($item)}
+foreach($item in @('enabled=1','mode=2','reset_every=0','async_home=0','hold_strength=0.000','mv_scale_x=1.000','mv_scale_y=1.000','work_resolution=100','work_upscale=0')){CfgSet $item $true}
+foreach($l in ((ReadText (Join-Path $defaults 'dlss5-feed.cfg')) -split '\r?\n')){if($l.Trim()){CfgSet $l.Trim() $false}}
+$changes['dlss5-feed.cfg']=@{Text=(($cfgLines -join "`r`n")+"`r`n")}
 $rs=ReadText (SafePath $root 'ReShade.ini')
 if($rs -and !$reuseShaders){
     # Keep existing presets intact. The user selects our separate preset for the first run.
@@ -108,7 +118,7 @@ if($rs -and !$reuseShaders){
     if($rs -match '(?im)^TextureSearchPaths=(.*)$'){$paths=$Matches[1].Trim()}else{$paths=''}
     if($paths -notlike '*ffxi-clarity-shaders*'){$rs=SetIni $rs 'GENERAL' 'TextureSearchPaths' ($paths+',.\ffxi-clarity-shaders\Textures\**').Trim(',')}
 }elseif(!$rs){
-    $rs="[GENERAL]`r`nEffectSearchPaths=.\ffxi-clarity-shaders\Shaders\**`r`nTextureSearchPaths=.\ffxi-clarity-shaders\Textures\**`r`nPresetPath=.\FFXI-Clarity.ini`r`nPreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=0,RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0,RESHADE_DEPTH_INPUT_IS_LOGARITHMIC=0,RESHADE_DEPTH_LINEARIZATION_FAR_PLANE=1000.0`r`n[INPUT]`r`nKeyOverlay=116,0,0,0`r`n[OVERLAY]`r`nAutoSavePreset=0`r`n[DEPTH]`r`nDepthCopyBeforeClears=0`r`n"
+    $rs="[GENERAL]`r`nEffectSearchPaths=.\ffxi-clarity-shaders\Shaders\**`r`nTextureSearchPaths=.\ffxi-clarity-shaders\Textures\**`r`nPresetPath=.\FFXI-Clarity.ini`r`nPreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=0,RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0,RESHADE_DEPTH_INPUT_IS_LOGARITHMIC=0,RESHADE_DEPTH_LINEARIZATION_FAR_PLANE=1000.0`r`n[INPUT]`r`nKeyOverlay=116,0,0,0`r`nKeyNextPreset=121,1,0,0`r`nKeyPreviousPreset=122,1,0,0`r`n[OVERLAY]`r`nAutoSavePreset=0`r`n[DEPTH]`r`nDepthCopyBeforeClears=0`r`n"
 }
 # Generic Depth: FFXI draws its 3D scene into a square buffer sized by the client's background
 # resolution (registry 0003/0004). Lock the depth filter to it so the right buffer is picked on
@@ -132,7 +142,7 @@ try{
     $failedFiles=Join-Path $backupDir 'failed-install-files'
     foreach($r in $records){$p=SafePath $root $r.Path;if($r.Before){Copy-Item -LiteralPath (SafePath $backupDir $r.Path) -Destination $p -Force}elseif(Test-Path -LiteralPath $p){$dest=SafePath $failedFiles $r.Path;[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent));Move-Item -LiteralPath $p -Destination $dest}}
     throw $failure
-}finally{@{Target=$root;Files=@($records.ToArray());Version='1.1.0'} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backupDir 'receipt.json') -Encoding UTF8}
+}finally{@{Target=$root;Files=@($records.ToArray());Version=$manifest.Version} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backupDir 'receipt.json') -Encoding UTF8}
 Write-Output "Installed. Backup: $backupDir"
 Write-Output 'Select FFXI-Clarity.ini in ReShade for the first check. Existing presets remain available. Run host64\dlss5-feed-host64.exe --test before launching FFXI.'
 ReportLightingPack

@@ -25,11 +25,11 @@ that fixes the problems we hit on FFXI:
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.1.0\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.1.1\`.
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder (skip if your `bootloader\host64\` already has them).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
 4. Run `bootloader\host64\dlss5-feed-host64.exe --test` once; expect `300/300 evaluates succeeded`.
-5. Launch FFXI. **F5** opens ReShade (preset `FFXI-Clarity.ini`), **F6** opens OptiScaler in the helper window.
+5. Launch FFXI. **F5** opens ReShade (preset `FFXI-Clarity.ini`). The "DLSS 5 Feed host" window opens beside the game: **F6** there opens OptiScaler, and **Ctrl+F9** shows that panel inside the game.
 
 Options: `Setup.ps1 -Action Install -Target "D:\Games\Ashita\bootloader" -DepthFilter 2048`.
 The installer refuses unknown graphics wrappers rather than overwriting them.
@@ -50,12 +50,25 @@ The installer refuses unknown graphics wrappers rather than overwriting them.
 
 Frame generation (e.g. Lossless Scaling) is separate and not configured by this package.
 
+## Changes
+
+- **1.1.1**: fixes regressions in 1.1.0. Ships the tested neural forwarder (`nvngx.dll_dlssnr.dll`,
+  the one every tested setup used) instead of a fresh build that made extra passes crush detail. A fresh
+  install now gets the full tested `OptiScaler.ini` (F6 menu key, pass and taper tuning) and the helper's
+  `ReShade.ini`, instead of a minimal stub. `dlss5-feed.cfg` is written one key per line with a final
+  newline, so `host_window=1` can no longer end up glued to the previous line (hidden helper window).
+  Existing files are still kept, never replaced.
+- **1.1.0**: first release.
+
 ## Building
 
 - DLL: `git clone -b ffxi-clarity --recurse-submodules https://github.com/OpMoonRise2/OptiScaler_DLSSNR`,
   then build `OptiScaler.sln` Release x64 (VS 2022+/v143 or v145). Output `x64\Release\OptiScaler.dll`
-  becomes `host64\winmm.dll`; `x64\Release\a\nvngx.dll_dlssnr.dll` ships beside it.
-- Release zip: `tools\Build-Release.ps1 -StackDir <working bootloader> -ForkBuildDir <fork>\x64\Release`.
+  becomes `host64\winmm.dll`. The shipped `winmm.dll` is built from the source at tag `v1.1.0-ffxi`
+  (identical apart from the embedded commit id).
+- Release zip: `tools\Build-Release.ps1 -StackDir <working, played-on bootloader>`. It packages that
+  bootloader's `host64\winmm.dll` and `host64\nvngx.dll_dlssnr.dll`, and refuses to build unless they
+  match `tools\known-good.json`.
 
 ## Status
 
