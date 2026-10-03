@@ -16,7 +16,8 @@ that fixes the problems we hit on FFXI:
 
 ## Requirements
 
-- An NVIDIA RTX GPU and a driver that ships DLSS 5 neural rendering (tested: **RTX 4060 8GB, driver 616.92**).
+- An NVIDIA RTX GPU and a driver that ships DLSS 5 neural rendering (tested: **RTX 4060 8GB, drivers 616.92 and 616.56**;
+  the current stack was played on 616.56).
 - Two NVIDIA files you supply yourself (licensing does not allow including them):
   `nvngx_dlss.dll` (DLSS, tested 310.9.1) and `nvngx_dlssnr.dll` (neural model, tested 310.8.0).
   See the [DLSS5-Feeder README](https://github.com/jlrouzies-fr/DLSS5-Feeder) for where to get them.
@@ -34,11 +35,21 @@ that fixes the problems we hit on FFXI:
 Options: `Setup.ps1 -Action Install -Target "D:\Games\Ashita\bootloader" -DepthFilter 2048`.
 The installer refuses unknown graphics wrappers rather than overwriting them.
 
+**Phoenix launcher:** it manages the renderer itself. On every launch it re-stages its own dgVoodoo and
+regenerates `bootloader\dgVoodoo.conf` from its settings, so hand edits to that file never last. Before
+installing, set its graphics output to **D3D11** (the installer refuses D3D12) and **MSAA Off**, and keep
+MSAA off: with MSAA on, the Shader Toggler can no longer keep the effects off the game's UI.
+
 ## Looks
 
 - `FFXI-Clarity.ini` (default): VORT motion vectors + DLSS feed only. Clean and cheap.
 - `presets\Clarity-Lumenite-Strong.ini`: adds LumeniteFX lighting and Zenteon TurboGI. These
   shaders are **not included**; see [LIGHTING-EXTRAS.md](LIGHTING-EXTRAS.md).
+- `presets\Clarity-Lumenite-QuantMotion.ini`: the current played-on look. LumeniteFX QuantMotion supplies
+  DLSS's motion vectors (provider 4), with Lumenite AO, TRAA and SSSR. Also needs LumeniteFX.
+- Neural style: OptiScaler (**F6**) > DLSS-NR > Style: Default, Natural or **Cinematic** (`Style = 2` in
+  `host64\OptiScaler.ini`, the shipped default). Cinematic tones down shine and over-processing for a
+  film-like look. Press **Save INI** in that menu after changing anything, or it is lost on exit.
 
 ## Performance (RTX 4060 8GB, 2560x1440, 55-71% model resolution)
 
@@ -52,6 +63,14 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **Unreleased** (played on 2026-10-02: RTX 4060, driver 616.56, Phoenix and Ashita): DLSS5-Feeder **1.17.0**
+  (protocol v11). `dlss5-feed.addon32`, `host64\dlss5-feed-host64.exe` and `DLSS5_Feed.fx` must come from
+  the same Feeder release; `tools\known-good.json` now pins all three. Same OptiScaler fork DLL and neural
+  forwarder as 1.1.1. New tested tuning: `OptiScaler.ini` DLSS-NR preset 1, Style 2 (Cinematic), intensity
+  1.30, working scale 0.93, pass taper 0.16; `dlss5-feed.cfg` async home, work upscale, sharpness 0.49 and
+  output hold 0.182/0.040, which the installer now forces in place of the 1.1.1 values. New
+  `presets\Clarity-Lumenite-QuantMotion.ini`. `Build-Release.ps1` takes the feeder effect and VORT from
+  whichever shader folder has them. Phoenix launcher notes (D3D11, MSAA off).
 - **1.1.1**: fixes regressions in 1.1.0. Ships the tested neural forwarder (`nvngx.dll_dlssnr.dll`,
   the one every tested setup used) instead of a fresh build that made extra passes crush detail. A fresh
   install now gets the full tested `OptiScaler.ini` (F6 menu key, pass and taper tuning) and the helper's

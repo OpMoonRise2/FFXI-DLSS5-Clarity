@@ -103,11 +103,12 @@ $changes['host64\OptiScaler.ini']=@{Text=$opti}
 if(!(Test-Path -LiteralPath (SafePath $root 'host64\ReShade.ini'))){$changes['host64\ReShade.ini']=@{Text=(ReadText (Join-Path $defaults 'host64-ReShade.ini'))}}
 # dlss5-feed.cfg: one key=value per line, CRLF-terminated, so a later hand edit or append cannot glue two keys.
 # Forced keys are what the fixes need; every other tested key is added only if absent (host_window=1 keeps
-# the helper window, where F6 opens OptiScaler, and Ctrl+F9 casts it into the game).
+# the helper window, where F6 opens OptiScaler, and Ctrl+F9 casts it into the game). The forced values are
+# the 2026-10-02 played-on stack (Feeder 1.17.0): async home, work upscale and the 0.182 output hold.
 $cfgLines=[Collections.Generic.List[string]]::new()
 foreach($l in ((ReadText (SafePath $root 'dlss5-feed.cfg')) -split '\r?\n')){if($l.Trim()){$cfgLines.Add($l.Trim())}}
 function CfgSet([string]$item,[bool]$force){$key=$item.Split('=')[0];for($i=0;$i -lt $cfgLines.Count;$i++){if($cfgLines[$i] -match ('^'+[regex]::Escape($key)+'=')){if($force){$cfgLines[$i]=$item};return}};$cfgLines.Add($item)}
-foreach($item in @('enabled=1','mode=2','reset_every=0','async_home=0','hold_strength=0.000','mv_scale_x=1.000','mv_scale_y=1.000','work_resolution=100','work_upscale=0')){CfgSet $item $true}
+foreach($item in @('enabled=1','mode=2','reset_every=0','async_home=1','hold_strength=0.182','mv_scale_x=1.000','mv_scale_y=1.000','work_resolution=100','work_upscale=1')){CfgSet $item $true}
 foreach($l in ((ReadText (Join-Path $defaults 'dlss5-feed.cfg')) -split '\r?\n')){if($l.Trim()){CfgSet $l.Trim() $false}}
 $changes['dlss5-feed.cfg']=@{Text=(($cfgLines -join "`r`n")+"`r`n")}
 $rs=ReadText (SafePath $root 'ReShade.ini')

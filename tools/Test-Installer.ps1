@@ -20,13 +20,15 @@ Assert (Test-Path "$f\host64\winmm.dll") 'fresh: patched DLL installed'
 Assert (Test-Path "$f\host64\nvngx.dll_dlssnr.dll") 'fresh: forwarder installed from payload'
 Assert (Test-Path "$f\ReshadeEffectShaderToggler.addon32") 'fresh: shader toggler installed'
 Assert (Test-Path "$f\presets\Clarity-Lumenite-Strong.ini") 'fresh: lighting preset installed'
+Assert ((Get-Content -Raw "$f\presets\Clarity-Lumenite-QuantMotion.ini") -match 'DLSS5_MV_PROVIDER=4') 'fresh: QuantMotion preset installed (motion provider 4)'
 $ini = Get-Content -Raw "$f\host64\OptiScaler.ini"
 Assert ($ini -match 'ResetDlaaHistory=true' -and $ini -match '(?m)^\[DlssNr\]') 'fresh: motion fix + neural section written'
 Assert ($ini -match '(?m)^\s*ShortcutKey\s*=\s*0x75' -and $ini.Length -gt 10000) 'fresh: full tested OptiScaler.ini installed (F6 menu key)'
 Assert ((Get-Content -Raw "$f\host64\ReShade.ini") -match '(?m)^KeyOverlay=36,') 'fresh: helper ReShade.ini installed with [INPUT]'
 $cfg = Get-Content -Raw "$f\dlss5-feed.cfg"
 Assert ($cfg -notmatch '(\r?\n){2}' -and !$cfg.StartsWith("`r`n") -and $cfg.EndsWith("`r`n")) 'fresh: cfg has no blank lines and ends with a newline'
-Assert ($cfg -match '(?m)^work_sharpness=0.61\r?$' -and $cfg -match '(?m)^hold_tolerance=0.020\r?$') 'fresh: tested cfg keys written'
+Assert ($cfg -match '(?m)^work_sharpness=0.49\r?$' -and $cfg -match '(?m)^hold_tolerance=0.040\r?$') 'fresh: tested cfg keys written'
+Assert ($cfg -match '(?m)^async_home=1\r?$' -and $cfg -match '(?m)^hold_strength=0.182\r?$' -and $cfg -match '(?m)^work_upscale=1\r?$') 'fresh: forced 1.17.0 stack keys written'
 $rs = Get-Content -Raw "$f\ReShade.ini"
 Assert ($rs -match 'FilterResolutionWidth=4096' -and $rs -match 'UseAspectRatioHeuristics=4') 'fresh: depth filter written'
 Assert ($rs -notmatch '[A-Z]:\\') 'fresh: ReShade.ini has no absolute paths'
@@ -50,7 +52,7 @@ $g = Fixture 'glued cfg'
 [IO.File]::WriteAllText("$g\host64\ReShade.ini", "[INPUT]`r`nKeyOverlay=35,0,0,0`r`n")
 & $setup -Action Install -Target $g | Out-Null
 $cfg = Get-Content -Raw "$g\dlss5-feed.cfg"
-Assert ($cfg -match '(?m)^work_upscale=0\r?$' -and $cfg -match '(?m)^host_window=1\r?$' -and $cfg -notmatch '0host_window') 'glued cfg: every key on its own line'
+Assert ($cfg -match '(?m)^work_upscale=1\r?$' -and $cfg -match '(?m)^host_window=1\r?$' -and $cfg -notmatch '0host_window') 'glued cfg: every key on its own line'
 Assert ($cfg -match '(?m)^work_sharpness=0.40\r?$' -and $cfg.EndsWith("`r`n")) 'glued cfg: user value kept, newline-terminated'
 Assert ((Get-Content -Raw "$g\host64\ReShade.ini") -match 'KeyOverlay=35') 'existing helper ReShade.ini kept'
 $rs = Get-Content -Raw "$e\ReShade.ini"
