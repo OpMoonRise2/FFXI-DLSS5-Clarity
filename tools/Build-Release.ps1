@@ -19,7 +19,7 @@
 #>
 param(
     [Parameter(Mandatory)][string]$StackDir,
-    [string]$Version = '1.1.1',
+    [string]$Version = '1.2.0',
     [string]$ForkCommit = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -53,7 +53,7 @@ foreach ($f in 'OptiScaler.ini','host64-ReShade.ini','dlss5-feed.cfg') { Put (Jo
 
 if ((Get-Content -Raw (Join-Path $out 'defaults\OptiScaler.ini')) -notmatch '(?m)^\s*ShortcutKey\s*=\s*0x75') { throw 'Regression guard: defaults\OptiScaler.ini lost the F6 menu key.' }
 
-# Shaders: the feeder effect, ReShade headers (CC0) and VORT (MIT) only. A played-on stack can hold them in
+# Shaders: the feeder effect, ReShade.fxh (CC0-1.0) and VORT (MIT) only. A played-on stack can hold them in
 # two folders (reshade-shaders\ for the active preset, ffxi-clarity-shaders\ from this package), so each
 # piece comes from the first folder that has it. The feeder effect must match the shipped dlss5-feed.addon32.
 $shaderDirs = 'reshade-shaders','ffxi-clarity-shaders' | ForEach-Object { Join-Path $StackDir $_ }
@@ -62,7 +62,8 @@ function FirstWith($rel) {
     throw "Missing input: $rel in neither reshade-shaders\ nor ffxi-clarity-shaders\"
 }
 $fx = FirstWith 'Shaders\DLSS5_Feed.fx'
-foreach ($f in 'DLSS5_Feed.fx','ReShade.fxh','ReShadeUI.fxh') { Put (Join-Path $fx "Shaders\$f") "payload\ffxi-clarity-shaders\Shaders\$f" }
+# (ReShadeUI.fxh is not shipped: no shader here includes it and upstream publishes no licence for it.)
+foreach ($f in 'DLSS5_Feed.fx','ReShade.fxh') { Put (Join-Path $fx "Shaders\$f") "payload\ffxi-clarity-shaders\Shaders\$f" }
 $vort = FirstWith 'Shaders\vort_Shaders\vort_Motion.fx'
 Put (Join-Path $vort 'Shaders\vort_Shaders\vort_Motion.fx') 'payload\ffxi-clarity-shaders\Shaders\vort_Shaders\vort_Motion.fx'
 Get-ChildItem (Join-Path $vort 'Shaders\vort_Shaders\Includes') -File | ForEach-Object { Put $_.FullName "payload\ffxi-clarity-shaders\Shaders\vort_Shaders\Includes\$($_.Name)" }
@@ -82,6 +83,12 @@ foreach ($p in $known.PSObject.Properties) {
 # Guard: nothing non-redistributable may slip in
 $banned = 'nvngx_dlss.dll','nvngx_dlssnr.dll','lumenite_*','Zenteon*','zzz_display_commander*','*AdjustDepth*','DisplayCommander.ini'
 foreach ($b in $banned) { if (Get-ChildItem $out -Recurse -File -Filter $b) { throw "Non-redistributable file in release: $b" } }
+
+# Guard: every notice the shipped files need goes with them (the Feeder binaries build in MinHook, Dear ImGui
+# and dlss5-bridge; several VORT includes carry no header of their own)
+$notices = 'OptiScaler-GPL.txt','Feeder-MIT.txt','dlss5-bridge-MIT.txt','MinHook-BSD-2.txt','ImGui-MIT.txt','ReShade-BSD.txt',
+           'REST-LICENSE.txt','VORT-MIT.txt','RenoDX_ATTRIBUTION.txt','dgVoodoo-readme.html'
+foreach ($n in $notices) { if (!(Test-Path -LiteralPath (Join-Path $out "licenses\$n"))) { throw "Licence guard: licenses\$n is missing from the release." } }
 
 $hashes = @{}
 Get-ChildItem $out -Recurse -File | ForEach-Object { $hashes[$_.FullName.Substring($out.Length + 1)] = Hash $_.FullName }

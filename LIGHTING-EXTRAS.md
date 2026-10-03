@@ -1,6 +1,6 @@
 # Optional lighting pack (Clarity-Lumenite presets)
 
-The look in the showcase video uses two shader packs whose licences do not allow re-hosting.
+The lighting presets use shader packs whose licences do not allow re-hosting.
 Get them from their authors, then drop them in:
 
 1. **LumeniteFX** by Umar Afzaal: https://github.com/umar-afzaal/LumeniteFX
