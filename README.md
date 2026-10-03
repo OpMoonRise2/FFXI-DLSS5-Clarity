@@ -134,7 +134,8 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 - DLL: `git clone -b ffxi-clarity --recurse-submodules https://github.com/OpMoonRise2/OptiScaler_DLSSNR`,
   then build `OptiScaler.sln` Release x64 (VS 2022+/v143 or v145). Output `x64\Release\OptiScaler.dll`
   becomes `host64\winmm.dll`. The shipped `winmm.dll` is built from the source at tag `v1.1.0-ffxi`
-  (identical apart from the embedded commit id).
+  (identical apart from the embedded commit id). The shipped `nvngx.dll_dlssnr.dll` is the unmodified
+  forwarder from [Dagherbou's release `v0.2.0-patch1`](https://github.com/Dagherbou/OptiScaler_DLSSNR/releases/tag/v0.2.0-patch1).
 - Release zip: `tools\Build-Release.ps1 -StackDir <working, played-on bootloader>`. It refuses to build unless
   the stack's `host64\winmm.dll`, `host64\nvngx.dll_dlssnr.dll`, Feeder pair and `DLSS5_Feed.fx` match
   `tools\known-good.json`, nothing non-redistributable slipped in, and every licence notice is present.
