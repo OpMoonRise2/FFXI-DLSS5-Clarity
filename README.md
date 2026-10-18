@@ -51,8 +51,25 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder (skip if your `bootloader\host64\` already has them).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
 4. Run `bootloader\host64\dlss5-feed-host64.exe --test` once; expect `300/300 evaluates succeeded`.
-5. Launch FFXI. On a fresh install **F5** opens ReShade (preset `FFXI-Clarity.ini`). The "DLSS 5 Feed host"
-   window opens beside the game: **F6** there opens OptiScaler, and **Ctrl+F9** shows that panel inside the game.
+5. Launch FFXI. A second window, "DLSS 5 Feed host", opens beside the game. See [Shortcuts](#shortcuts) for
+   how to open each settings menu.
+
+## Shortcuts
+
+Where you press a key matters: the game window and the "DLSS 5 Feed host" helper window are two programs.
+
+| Key | Press it in | What it does |
+|---|---|---|
+| **Ctrl+F9** | the game | Shows the helper window (with OptiScaler's menu, if open) inside the game, and hides it again. Use this if you don't want to Alt+Tab |
+| **F6** or **Insert** | the helper window (Alt+Tab to it, or Ctrl+F9 first) | Opens **OptiScaler**, where the DLSS and neural settings are (DLSS-NR section). Press **Save INI** there or changes are lost on exit. F6 is set in `host64\OptiScaler.ini` (`ShortcutKey = 0x75`) for keyboards without Insert; Insert always works too |
+| **Home** | the helper window | Opens the helper's own ReShade overlay (DLSS 5 Feed host settings) |
+| **F5** (fresh install) or your own ReShade key | the game | Opens the game's ReShade overlay: effects, preset and the DLSS 5 Feed effect. An existing `ReShade.ini` keeps its key (often **Home**) |
+| **Ctrl+Shift+F1 / F2** | the game (works anywhere) | 1 or 2 neural passes |
+| **Ctrl+Shift+F3** | the game (works anywhere) | Neural pass off, DLAA stays on (for comparisons) |
+| **Ctrl+Shift+F4 / F5 / F6** | the game (works anywhere) | Neural pass on with style Default / Natural / Cinematic |
+
+The Ctrl+Shift keys are not saved: the next start uses `host64\OptiScaler.ini` again. The helper's title bar
+names the menu key in use (for example "press F6/Insert HERE for OptiScaler's menu | in game: Ctrl+F9 shows this window").
 
 Options: `Setup.ps1 -Action Install -Target "D:\Games\Ashita\bootloader" -DepthFilter 2048`.
 
@@ -77,6 +94,7 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
 - **Settings it writes:**
   - `dlss5-feed.cfg`: forces `enabled`, `mode`, `reset_every`, `async_home`, `hold_strength`, `mv_scale_x/y`,
     `work_resolution` and `work_upscale` to the tested values, and adds the other tested keys only if missing.
+    `cast_key=0` (Ctrl+F9 switched off) is set back to Ctrl+F9; a different key you chose is kept.
   - `host64\OptiScaler.ini`: the tested file if you have none. An existing one keeps your values; only
     `ResetDlaaHistory=true` and DLSS-NR `Enabled=true` are set in it.
   - `host64\ReShade.ini`: only if missing.
@@ -105,9 +123,10 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
   normal and depth textures that only `lumenite_Kernel.fx` writes, and `Lumenite_Kernel` is not enabled in
   this preset, so TRAA reprojects with zero flow (its sharpening still applies) and SSSR traces against empty
   guides. Enable `Lumenite_Kernel` above DLSS 5 Feed if you want them fed; it costs GPU time.
-- Neural style: OptiScaler (**F6**) > DLSS-NR > Style: Default, Natural or **Cinematic** (`Style = 2` in
-  `host64\OptiScaler.ini`; fresh installs get Cinematic). Cinematic tones down shine and over-processing for
-  a film-like look. Press **Save INI** in that menu after changing anything, or it is lost on exit.
+- Neural style: OptiScaler (**F6** or **Insert** in the helper window) > DLSS-NR > Style: Default, Natural or
+  **Cinematic** (`Style = 2` in `host64\OptiScaler.ini`; fresh installs get Cinematic; an existing ini keeps
+  yours). Cinematic tones down shine and over-processing for a film-like look. Press **Save INI** in that menu
+  after changing anything, or it is lost on exit. Ctrl+Shift+F4/F5/F6 switch styles for a quick comparison.
 
 ## Performance (RTX 4060 8GB, 2560x1440)
 
@@ -136,7 +155,10 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
   copy is refreshed. Also: `ReShade.ini` gets `RESHADE_DEPTH_INPUT_IS_REVERSED=0` when the orientation was
   never set; the shipped `OptiScaler.ini` is the 2026-10-02 reset default (working scale 0.86, FPS readout on);
   new Troubleshooting section; installer tests for the compatible-existing, stale-effect, explicit-depth and
-  refusal cases.
+  refusal cases. Settings access: Insert now opens OptiScaler in the helper alongside the configured key (F6),
+  matching what the helper itself tells users; the helper's title bar names the real key; `cast_key=0` in an
+  existing `dlss5-feed.cfg` (Ctrl+F9 off) is set back to Ctrl+F9; new Shortcuts table. Played on 2026-10-17
+  (Ashita, LSB, RTX 4060, 616.56): ReShade in both processes, DLSS 310.9.1, depth reversed=0, ~29 fps.
 - **1.2.0** (played on 2026-10-02: RTX 4060, driver 616.56, Phoenix and Ashita): DLSS5-Feeder **1.17.0**
   (protocol v11). `dlss5-feed.addon32`, `host64\dlss5-feed-host64.exe` and `DLSS5_Feed.fx` must come from
   the same Feeder release; `tools\known-good.json` now pins all three. Same OptiScaler fork DLL and neural
@@ -188,6 +210,13 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
   `PreprocessorDefinitions` must contain `RESHADE_DEPTH_INPUT_IS_REVERSED=0`; `DisplayDepth.fx` should show near
   objects dark. `host64\OptiScaler.ini` keeps `[InitFlags] DepthInverted = false`.
 - **1.2.0 refused with `Existing shader differs or is incomplete` lines.** Fixed in 1.2.1; nothing to change.
+- **Ctrl+F9 does nothing.** Click the game first (it is read by the game). `bootloader\dlss5-feed.log` shows
+  `cast_key=` in its `config:` line; 0 means off. Re-run `Install.cmd` or set `cast_key=120` and `cast_mods=2`.
+- **The OptiScaler menu does not open.** The key goes to the helper window, not the game: Alt+Tab to "DLSS 5
+  Feed host" (or Ctrl+F9 in game) and press F6 or Insert. The title bar names the key.
+- **Low fps right after login or zoning.** The first `600 frames:` line in `dlss5-feed.log` can read ~10 fps
+  while the zone loads; check the next lines. Also check that FFXI's own background fps limit is not active
+  while the game window lacks focus.
 - **No neural effect after a hotkey.** Ctrl+Shift+F3 is the neural-off comparison key; Ctrl+Shift+F6 brings
   Cinematic back. Hotkey changes are not saved: the `OptiScaler.ini` values return at the next start.
 

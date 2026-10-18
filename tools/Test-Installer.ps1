@@ -54,6 +54,19 @@ $g = Fixture 'glued cfg'
 $cfg = Get-Content -Raw "$g\dlss5-feed.cfg"
 Assert ($cfg -match '(?m)^work_upscale=1\r?$' -and $cfg -match '(?m)^host_window=1\r?$' -and $cfg -notmatch '0host_window') 'glued cfg: every key on its own line'
 Assert ($cfg -match '(?m)^work_sharpness=0.40\r?$' -and $cfg.EndsWith("`r`n")) 'glued cfg: user value kept, newline-terminated'
+Assert ($cfg -match '(?m)^cast_key=120\r?$' -and $cfg -match '(?m)^cast_mods=2\r?$') 'glued cfg: Ctrl+F9 cast key added when missing'
+
+# 2c. cast_key=0 (Ctrl+F9 switched off) is re-bound; a user's own key is kept
+$k = Fixture 'cast off'
+[IO.File]::WriteAllText("$k\dlss5-feed.cfg", "cast_key=0`r`ncast_mods=0`r`n")
+& $setup -Action Install -Target $k | Out-Null
+$cfg = Get-Content -Raw "$k\dlss5-feed.cfg"
+Assert ($cfg -match '(?m)^cast_key=120\r?$' -and $cfg -match '(?m)^cast_mods=2\r?$') 'cast_key=0: re-bound to Ctrl+F9'
+$k2 = Fixture 'cast custom'
+[IO.File]::WriteAllText("$k2\dlss5-feed.cfg", "cast_key=119`r`ncast_mods=4`r`n")
+& $setup -Action Install -Target $k2 | Out-Null
+$cfg = Get-Content -Raw "$k2\dlss5-feed.cfg"
+Assert ($cfg -match '(?m)^cast_key=119\r?$' -and $cfg -match '(?m)^cast_mods=4\r?$') 'custom cast key kept'
 Assert ((Get-Content -Raw "$g\host64\ReShade.ini") -match 'KeyOverlay=35') 'existing helper ReShade.ini kept'
 $rs = Get-Content -Raw "$e\ReShade.ini"
 Assert ($rs -match 'PresetPath=.\\mine.ini' -and $rs -match 'FilterResolutionWidth=2048') 'existing: preset and user depth filter kept'

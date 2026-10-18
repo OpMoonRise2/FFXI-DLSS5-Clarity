@@ -119,6 +119,10 @@ foreach($l in ((ReadText (SafePath $root 'dlss5-feed.cfg')) -split '\r?\n')){if(
 function CfgSet([string]$item,[bool]$force){$key=$item.Split('=')[0];for($i=0;$i -lt $cfgLines.Count;$i++){if($cfgLines[$i] -match ('^'+[regex]::Escape($key)+'=')){if($force){$cfgLines[$i]=$item};return}};$cfgLines.Add($item)}
 foreach($item in @('enabled=1','mode=2','reset_every=0','async_home=1','hold_strength=0.182','mv_scale_x=1.000','mv_scale_y=1.000','work_resolution=100','work_upscale=1')){CfgSet $item $true}
 foreach($l in ((ReadText (Join-Path $defaults 'dlss5-feed.cfg')) -split '\r?\n')){if($l.Trim()){CfgSet $l.Trim() $false}}
+# Ctrl+F9 (show the helper window, and with it OptiScaler's menu, inside the game) is the documented way to
+# reach the settings without Alt+Tab. cast_key=0 switches it off, which left users with no in-game route;
+# an unbound key is bound to Ctrl+F9. Any other key the user chose is kept.
+for($i=0;$i -lt $cfgLines.Count;$i++){if($cfgLines[$i] -match '^cast_key=0*\s*$'){$cfgLines[$i]='cast_key=120';CfgSet 'cast_mods=2' $true}}
 $changes['dlss5-feed.cfg']=@{Text=(($cfgLines -join "`r`n")+"`r`n")}
 $rs=ReadText (SafePath $root 'ReShade.ini')
 if($rs){
