@@ -41,23 +41,24 @@ if($Action -eq 'Restore'){
 }
 if(!@(Get-ChildItem -LiteralPath $root -File -Filter '*.exe').Count){throw 'Choose the folder containing the FFXI loader/game executable, not the launcher download directory.'}
 $problems=[Collections.Generic.List[string]]::new()
-$reuseShaders=$false
-$existingShaders=SafePath $root 'reshade-shaders\Shaders\DLSS5_Feed.fx'
-if(Test-Path -LiteralPath $existingShaders){
+# An existing reshade-shaders\ that already carries the feeder effect is the active preset's effect root
+# (a played-on setup keeps LumeniteFX and the feeder effect there). It stays the root. Only the feeder
+# effect has to match the shipped dlss5-feed.addon32 (same Feeder release), so one from another release is
+# replaced (backed up, restorable). VORT and the package's own ffxi-clarity-shaders\ copy are installed
+# beside it and are never required inside reshade-shaders\ (1.2.0 demanded all 23 files there and refused
+# the very setup this package was tuned on).
+$reuseShaders=$false;$staleFeed=$false
+$existingFeed=SafePath $root 'reshade-shaders\Shaders\DLSS5_Feed.fx'
+$feedEntry='payload\ffxi-clarity-shaders\Shaders\DLSS5_Feed.fx'
+if(Test-Path -LiteralPath $existingFeed){
     $reuseShaders=$true
-    foreach($entry in $manifest.Files.PSObject.Properties){
-        if($entry.Name.StartsWith('payload\ffxi-clarity-shaders\')){
-            $rel=$entry.Name.Substring('payload\ffxi-clarity-shaders\'.Length)
-            $old=SafePath $root ('reshade-shaders\'+$rel)
-            if(!(Test-Path -LiteralPath $old) -or (Hash $old) -ne $entry.Value){$problems.Add("Existing shader differs or is incomplete: $rel")}
-        }
-    }
+    if((Hash $existingFeed) -ne $manifest.Files.$feedEntry){$staleFeed=$true}
 }
 $runtime=@{}
 # The neural forwarder ships in payload (GPL, the tested 2026-09-20 build; see tools\known-good.json); NVIDIA's two runtimes are user-supplied.
 foreach($name in @('nvngx_dlss.dll','nvngx_dlssnr.dll')){
     $installed=SafePath $root ('host64\'+$name);$supplied=Join-Path $PSScriptRoot ('Dependencies\'+$name)
-    if(Test-Path -LiteralPath $installed){$runtime[$name]=$installed}elseif(Test-Path -LiteralPath $supplied){$runtime[$name]=$supplied}else{$problems.Add("Supply Dependencies\$name (see START-HERE.txt)")}
+    if(Test-Path -LiteralPath $installed){$runtime[$name]=$installed}elseif(Test-Path -LiteralPath $supplied){$runtime[$name]=$supplied}else{$problems.Add("Supply Dependencies\$name (see README.md, Requirements)")}
     if($runtime.ContainsKey($name) -and !(IsX64 $runtime[$name])){$problems.Add("$name must be a valid x64 DLL.")}
 }
 $preserveWrappers=@{}
@@ -80,6 +81,12 @@ if($conflicts.Count){$problems.Add('Another neural consumer is active in host64.
 Write-Output "FFXI Clarity portable preflight: $root"
 if($problems.Count){$problems | ForEach-Object {Write-Output "NEEDED: $_"};if($Action -eq 'Install'){throw 'No installation files changed.'};return}
 Write-Output 'File prerequisites passed. GPU, driver and live rendering still require the host test and gameplay check.'
+if($reuseShaders){
+    if($staleFeed){Write-Output 'Existing reshade-shaders\Shaders\DLSS5_Feed.fx is from another Feeder release: Install replaces it (backed up) so it matches the shipped dlss5-feed.addon32.'}
+    else{Write-Output 'Existing reshade-shaders\ already has this release''s DLSS5_Feed.fx: it stays the effect root; VORT is added from ffxi-clarity-shaders\.'}
+}
+$rsPeek=ReadText (SafePath $root 'ReShade.ini')
+if($rsPeek -and $rsPeek -notmatch 'RESHADE_DEPTH_INPUT_IS_REVERSED='){Write-Output 'ReShade.ini has no depth orientation: Install adds RESHADE_DEPTH_INPUT_IS_REVERSED=0 (FFXI depth is not reversed; ReShade assumes reversed).'}
 # Optional lighting pack: third-party shaders that may not be redistributed. Report, never fetch.
 function ReportLightingPack {
     $roots=@('ffxi-clarity-shaders','reshade-shaders') | ForEach-Object {Join-Path $root $_} | Where-Object {Test-Path -LiteralPath $_}
@@ -91,7 +98,9 @@ function ReportLightingPack {
 if($Action -eq 'Check'){ReportLightingPack;return}
 $changes=@{}
 $payload=Join-Path $PSScriptRoot 'payload'
-foreach($e in $manifest.Files.PSObject.Properties){if($e.Name.StartsWith('payload\')){if($reuseShaders -and $e.Name.StartsWith('payload\ffxi-clarity-shaders\')){continue};$rel=$e.Name.Substring(8);if($preserveWrappers.ContainsKey($rel)){continue};$dest=SafePath $root $rel;if(!(Test-Path -LiteralPath $dest) -or (Hash $dest) -ne $e.Value){$changes[$rel]=@{Source=(Join-Path $PSScriptRoot $e.Name)}}}}
+foreach($e in $manifest.Files.PSObject.Properties){if($e.Name.StartsWith('payload\')){$rel=$e.Name.Substring(8);if($preserveWrappers.ContainsKey($rel)){continue};$dest=SafePath $root $rel;if(!(Test-Path -LiteralPath $dest) -or (Hash $dest) -ne $e.Value){$changes[$rel]=@{Source=(Join-Path $PSScriptRoot $e.Name)}}}}
+# The feeder effect in an existing reshade-shaders\ must be the one built with the shipped add-on.
+if($staleFeed){$changes['reshade-shaders\Shaders\DLSS5_Feed.fx']=@{Source=(Join-Path $PSScriptRoot $feedEntry)}}
 foreach($n in $runtime.Keys){$rel='host64\'+$n;if(!(Test-Path -LiteralPath (SafePath $root $rel))){$changes[$rel]=@{Source=$runtime[$n]}}}
 # Tested configuration (defaults\): used whole when the file is missing, never over an existing one.
 $defaults=Join-Path $PSScriptRoot 'defaults'
@@ -110,15 +119,29 @@ foreach($l in ((ReadText (SafePath $root 'dlss5-feed.cfg')) -split '\r?\n')){if(
 function CfgSet([string]$item,[bool]$force){$key=$item.Split('=')[0];for($i=0;$i -lt $cfgLines.Count;$i++){if($cfgLines[$i] -match ('^'+[regex]::Escape($key)+'=')){if($force){$cfgLines[$i]=$item};return}};$cfgLines.Add($item)}
 foreach($item in @('enabled=1','mode=2','reset_every=0','async_home=1','hold_strength=0.182','mv_scale_x=1.000','mv_scale_y=1.000','work_resolution=100','work_upscale=1')){CfgSet $item $true}
 foreach($l in ((ReadText (Join-Path $defaults 'dlss5-feed.cfg')) -split '\r?\n')){if($l.Trim()){CfgSet $l.Trim() $false}}
+# Ctrl+F9 (show the helper window, and with it OptiScaler's menu, inside the game) is the documented way to
+# reach the settings without Alt+Tab. cast_key=0 switches it off, which left users with no in-game route;
+# an unbound key is bound to Ctrl+F9. Any other key the user chose is kept.
+for($i=0;$i -lt $cfgLines.Count;$i++){if($cfgLines[$i] -match '^cast_key=0*\s*$'){$cfgLines[$i]='cast_key=120';CfgSet 'cast_mods=2' $true}}
 $changes['dlss5-feed.cfg']=@{Text=(($cfgLines -join "`r`n")+"`r`n")}
 $rs=ReadText (SafePath $root 'ReShade.ini')
-if($rs -and !$reuseShaders){
+if($rs){
     # Keep existing presets intact. The user selects our separate preset for the first run.
+    # With an existing reshade-shaders\ as the effect root, only VORT (and the textures) are added from
+    # ffxi-clarity-shaders\: adding its whole Shaders\** too would hand ReShade two DLSS5_Feed.fx.
+    if($reuseShaders){$fxPath='.\ffxi-clarity-shaders\Shaders\vort_Shaders\**'}else{$fxPath='.\ffxi-clarity-shaders\Shaders\**'}
     if($rs -match '(?im)^EffectSearchPaths=(.*)$'){$paths=$Matches[1].Trim()}else{$paths=''}
-    if($paths -notlike '*ffxi-clarity-shaders*'){$rs=SetIni $rs 'GENERAL' 'EffectSearchPaths' ($paths+',.\ffxi-clarity-shaders\Shaders\**').Trim(',')}
+    if($paths -notlike '*ffxi-clarity-shaders*'){$rs=SetIni $rs 'GENERAL' 'EffectSearchPaths' ($paths+','+$fxPath).Trim(',')}
     if($rs -match '(?im)^TextureSearchPaths=(.*)$'){$paths=$Matches[1].Trim()}else{$paths=''}
     if($paths -notlike '*ffxi-clarity-shaders*'){$rs=SetIni $rs 'GENERAL' 'TextureSearchPaths' ($paths+',.\ffxi-clarity-shaders\Textures\**').Trim(',')}
-}elseif(!$rs){
+    # FFXI's depth (dgVoodoo, Direct3D 8 projection) is not reversed; ReShade assumes reversed when nothing
+    # says otherwise, which flips the feeder effect's depth tests and the orientation it reports to the host.
+    # Decide it once where the user has not; an explicit RESHADE_DEPTH_INPUT_IS_REVERSED of any value is kept.
+    if($rs -notmatch 'RESHADE_DEPTH_INPUT_IS_REVERSED='){
+        if($rs -match '(?im)^PreprocessorDefinitions=(.*)$'){$defs=$Matches[1].Trim()}else{$defs=''}
+        $rs=SetIni $rs 'GENERAL' 'PreprocessorDefinitions' ($defs+',RESHADE_DEPTH_INPUT_IS_REVERSED=0,RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0,RESHADE_DEPTH_INPUT_IS_LOGARITHMIC=0').Trim(',')
+    }
+}else{
     $rs="[GENERAL]`r`nEffectSearchPaths=.\ffxi-clarity-shaders\Shaders\**`r`nTextureSearchPaths=.\ffxi-clarity-shaders\Textures\**`r`nPresetPath=.\FFXI-Clarity.ini`r`nPreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=0,RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0,RESHADE_DEPTH_INPUT_IS_LOGARITHMIC=0,RESHADE_DEPTH_LINEARIZATION_FAR_PLANE=1000.0`r`n[INPUT]`r`nKeyOverlay=116,0,0,0`r`nKeyNextPreset=121,1,0,0`r`nKeyPreviousPreset=122,1,0,0`r`n[OVERLAY]`r`nAutoSavePreset=0`r`n[DEPTH]`r`nDepthCopyBeforeClears=0`r`n"
 }
 # Generic Depth: FFXI draws its 3D scene into a square buffer sized by the client's background

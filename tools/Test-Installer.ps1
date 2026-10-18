@@ -54,6 +54,19 @@ $g = Fixture 'glued cfg'
 $cfg = Get-Content -Raw "$g\dlss5-feed.cfg"
 Assert ($cfg -match '(?m)^work_upscale=1\r?$' -and $cfg -match '(?m)^host_window=1\r?$' -and $cfg -notmatch '0host_window') 'glued cfg: every key on its own line'
 Assert ($cfg -match '(?m)^work_sharpness=0.40\r?$' -and $cfg.EndsWith("`r`n")) 'glued cfg: user value kept, newline-terminated'
+Assert ($cfg -match '(?m)^cast_key=120\r?$' -and $cfg -match '(?m)^cast_mods=2\r?$') 'glued cfg: Ctrl+F9 cast key added when missing'
+
+# 2c. cast_key=0 (Ctrl+F9 switched off) is re-bound; a user's own key is kept
+$k = Fixture 'cast off'
+[IO.File]::WriteAllText("$k\dlss5-feed.cfg", "cast_key=0`r`ncast_mods=0`r`n")
+& $setup -Action Install -Target $k | Out-Null
+$cfg = Get-Content -Raw "$k\dlss5-feed.cfg"
+Assert ($cfg -match '(?m)^cast_key=120\r?$' -and $cfg -match '(?m)^cast_mods=2\r?$') 'cast_key=0: re-bound to Ctrl+F9'
+$k2 = Fixture 'cast custom'
+[IO.File]::WriteAllText("$k2\dlss5-feed.cfg", "cast_key=119`r`ncast_mods=4`r`n")
+& $setup -Action Install -Target $k2 | Out-Null
+$cfg = Get-Content -Raw "$k2\dlss5-feed.cfg"
+Assert ($cfg -match '(?m)^cast_key=119\r?$' -and $cfg -match '(?m)^cast_mods=4\r?$') 'custom cast key kept'
 Assert ((Get-Content -Raw "$g\host64\ReShade.ini") -match 'KeyOverlay=35') 'existing helper ReShade.ini kept'
 $rs = Get-Content -Raw "$e\ReShade.ini"
 Assert ($rs -match 'PresetPath=.\\mine.ini' -and $rs -match 'FilterResolutionWidth=2048') 'existing: preset and user depth filter kept'
@@ -77,6 +90,58 @@ $l = Fixture 'lighting'
 New-Item -ItemType Directory "$l\reshade-shaders\Shaders\x" -Force | Out-Null
 foreach ($s in 'lumenite_Kernel.fx','Zenteon_TurboGI.fx') { [IO.File]::WriteAllText("$l\reshade-shaders\Shaders\x\$s", '//') }
 Assert (((& $setup -Action Check -Target $l) -join "`n") -match 'Optional lighting pack found') 'lighting pack detected on Check'
+
+# 6. Compatible existing setup (the played-on layout): the active preset's effects live in reshade-shaders\
+#    with this release's DLSS5_Feed.fx and LumeniteFX, VORT is absent there, and a stale 1.1.x copy of the
+#    feeder effect sits in ffxi-clarity-shaders\. 1.2.0 refused this with 21 "differs or is incomplete" lines.
+$feedFx = Join-Path $Package 'payload\ffxi-clarity-shaders\Shaders\DLSS5_Feed.fx'
+$c = Fixture 'compatible existing'
+New-Item -ItemType Directory "$c\reshade-shaders\Shaders","$c\reshade-shaders\Textures","$c\ffxi-clarity-shaders\Shaders" -Force | Out-Null
+Copy-Item $feedFx "$c\reshade-shaders\Shaders\DLSS5_Feed.fx"
+Copy-Item (Join-Path $Package 'payload\ffxi-clarity-shaders\Shaders\ReShade.fxh') "$c\reshade-shaders\Shaders\ReShade.fxh"
+[IO.File]::WriteAllText("$c\reshade-shaders\Shaders\lumenite_Kernel.fx", '//')
+[IO.File]::WriteAllText("$c\ffxi-clarity-shaders\Shaders\DLSS5_Feed.fx", '// stale 1.1.x feeder effect')
+[IO.File]::WriteAllText("$c\ReShade.ini", "[GENERAL]`r`nEffectSearchPaths=.\reshade-shaders\Shaders\**`r`nTextureSearchPaths=.\reshade-shaders\Textures\**`r`nPreprocessorDefinitions=DLSS5_MV_PROVIDER=3`r`nPresetPath=.\ReshadePreset.ini`r`n[DEPTH]`r`nFilterResolutionWidth=4096`r`nFilterResolutionHeight=4096`r`nUseAspectRatioHeuristics=4`r`n")
+$chk = (& $setup -Action Check -Target $c) -join "`n"
+Assert ($chk -notmatch 'NEEDED' -and $chk -match 'stays the effect root' -and $chk -match 'no depth orientation') 'compatible: preflight passes, reports the kept effect root and the depth orientation'
+& $setup -Action Install -Target $c | Out-Null
+Assert ((Hash "$c\reshade-shaders\Shaders\DLSS5_Feed.fx") -eq (Hash $feedFx)) 'compatible: matching feeder effect in reshade-shaders left as is'
+Assert ((Hash "$c\ffxi-clarity-shaders\Shaders\DLSS5_Feed.fx") -eq (Hash $feedFx)) 'compatible: stale ffxi-clarity-shaders copy refreshed'
+Assert (Test-Path "$c\ffxi-clarity-shaders\Shaders\vort_Shaders\vort_Motion.fx") 'compatible: VORT installed into ffxi-clarity-shaders'
+$rs = Get-Content -Raw "$c\ReShade.ini"
+Assert ($rs.Contains('EffectSearchPaths=.\reshade-shaders\Shaders\**,.\ffxi-clarity-shaders\Shaders\vort_Shaders\**')) 'compatible: only the VORT path added to the effect search path (no second DLSS5_Feed.fx)'
+Assert ($rs.Contains('TextureSearchPaths=.\reshade-shaders\Textures\**,.\ffxi-clarity-shaders\Textures\**')) 'compatible: texture path added'
+Assert ($rs.Contains('PreprocessorDefinitions=DLSS5_MV_PROVIDER=3,RESHADE_DEPTH_INPUT_IS_REVERSED=0,RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0,RESHADE_DEPTH_INPUT_IS_LOGARITHMIC=0')) 'compatible: depth orientation added after the user''s definitions'
+Assert ($rs -match 'PresetPath=.\\ReshadePreset.ini' -and $rs -match 'FilterResolutionWidth=4096') 'compatible: preset and depth filter kept'
+Assert (Test-Path "$c\host64\winmm.dll") 'compatible: patched DLL installed'
+
+# 7. Feeder effect from another release in reshade-shaders\: replaced with a backup, and Restore brings it back
+$s = Fixture 'stale feeder effect'
+New-Item -ItemType Directory "$s\reshade-shaders\Shaders" -Force | Out-Null
+[IO.File]::WriteAllText("$s\reshade-shaders\Shaders\DLSS5_Feed.fx", '// 1.1.x feeder effect')
+$chk = (& $setup -Action Check -Target $s) -join "`n"
+Assert ($chk -match 'from another Feeder release: Install replaces it') 'stale feeder: preflight announces the replacement'
+& $setup -Action Install -Target $s | Out-Null
+Assert ((Hash "$s\reshade-shaders\Shaders\DLSS5_Feed.fx") -eq (Hash $feedFx)) 'stale feeder: replaced with the shipped effect'
+$bk = (Get-ChildItem $s -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+Assert ((Get-Content -Raw "$bk\reshade-shaders\Shaders\DLSS5_Feed.fx") -eq '// 1.1.x feeder effect') 'stale feeder: original backed up'
+& $setup -Action Restore -Target $s -Backup $bk | Out-Null
+Assert ((Get-Content -Raw "$s\reshade-shaders\Shaders\DLSS5_Feed.fx") -eq '// 1.1.x feeder effect') 'stale feeder: restore put the original back'
+Assert (!(Test-Path "$s\host64\winmm.dll")) 'stale feeder: restore removed the added DLL'
+
+# 8. An explicit depth orientation (either value) is the user's decision and stays
+$o = Fixture 'explicit depth'
+[IO.File]::WriteAllText("$o\ReShade.ini", "[GENERAL]`r`nPreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=1`r`n")
+& $setup -Action Install -Target $o | Out-Null
+Assert ((Get-Content -Raw "$o\ReShade.ini") -match '(?m)^PreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=1\r?$') 'explicit depth orientation kept'
+
+# 9. Genuine conflicts still refuse with no writes: D3D12 dgVoodoo, another neural consumer
+$x = Fixture 'd3d12 dgvoodoo'; [IO.File]::WriteAllText("$x\dgVoodoo.conf", "[General]`r`nOutputAPI = d3d12_fl11_0`r`n")
+$refused = $false; try { & $setup -Action Install -Target $x | Out-Null } catch { $refused = $true }
+Assert ($refused -and !(Test-Path "$x\host64\winmm.dll") -and !(Get-ChildItem $x -Directory -Filter 'FFXI-Clarity-backup-*')) 'D3D12 dgVoodoo.conf: refused, no writes'
+$y = Fixture 'neural consumer'; [IO.File]::WriteAllText("$y\host64\renodx-dlss5.addon64", 'x')
+$refused = $false; try { & $setup -Action Install -Target $y | Out-Null } catch { $refused = $true }
+Assert ($refused -and !(Test-Path "$y\host64\winmm.dll")) 'other neural consumer in host64: refused, no writes'
 
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'
