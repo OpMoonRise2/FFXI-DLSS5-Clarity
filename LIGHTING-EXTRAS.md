@@ -20,3 +20,7 @@ Re-running `Check.cmd` reports whether both packs are found.
 
 Effect order matters: the motion effect (VORT, or Lumenite QuantMotion), then DLSS5 Feed, then the lighting
 effects. Both presets already set it.
+
+In the QuantMotion preset, Lumenite TRAA and SSSR read the flow, normal and depth textures that only
+`lumenite_Kernel.fx` writes, and `Lumenite_Kernel` is off there (that is the look that was played). Turn it on,
+above DLSS 5 Feed, if you want TRAA's reprojection and SSSR fed with real guides; it costs GPU time.

@@ -7,12 +7,14 @@ FFXI is a 2002 32-bit Direct3D 8 game with no DLSS of its own. This package wire
 existing community work (credited in [CREDITS.md](CREDITS.md)) and adds a patched OptiScaler build
 that fixes the problems we hit on FFXI:
 
-| Problem | Fix (in the [OptiScaler_DLSSNR `ffxi-clarity` fork](https://github.com/OpMoonRise2/OptiScaler_DLSSNR/tree/v1.1.0-ffxi)) |
+| Problem | Fix (in the [OptiScaler_DLSSNR `ffxi-clarity` fork](https://github.com/OpMoonRise2/OptiScaler_DLSSNR/tree/v1.2.1-ffxi)) |
 |---|---|
 | Everything smears while the camera moves | **Prevent DLAA motion smearing**: DLAA's history is reset every frame while neural rendering keeps its own |
 | One neural pass is too subtle | **Neural passes 1-3**, each pass with its own history, refining the previous pass's result |
 | Extra passes crush dark detail to black | **Extra-pass taper**: passes 2-3 run local structure/tone at a fraction of pass 1 |
 | Switching pass count means opening a menu | **Ctrl+Shift+F1 / Ctrl+Shift+F2** for 1 or 2 passes, while the game has focus |
+| Comparing neural off/on and styles means opening a menu | **Ctrl+Shift+F3** neural pass off (DLAA stays); **Ctrl+Shift+F4 / F5 / F6** neural on with Default / Natural / Cinematic |
+| On a fresh install the helper window had no ReShade, so no **Ctrl+F9** panel in the game | **ReShade-first dxgi load**: OptiScaler loads the `dxgi.dll` beside the helper before Windows' own, every launch, not only when the helper wins a start-up race |
 
 **FFXI only.** Every part is set up for FFXI: dgVoodoo's Direct3D 8 path, the depth filter (FFXI draws its
 3D scene into a square background buffer), the Shader Toggler's shader list (FFXI's UI shaders, which keep
@@ -24,9 +26,9 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 
 - **Look:** DLAA anti-aliasing plus DLSS 5's neural relighting of the image. The shipped style is
   **Cinematic** (film-like, less shine); see [Looks](#looks).
-- **Cost:** heavy. On an RTX 4060 8GB at 2560x1440 the neural model takes about 23 ms of GPU time per
-  frame (19-29 ms), and the game runs at about 27-29 fps, against FFXI's own 30 fps cap. Slower cards or
-  higher resolutions land below that.
+- **Cost:** heavy. On an RTX 4060 8GB at 2560x1440 the neural model takes about 20-23 ms of GPU time per
+  frame (20 ms at the shipped working scale 0.86, 23 ms at 0.93), and the game runs at about 27-29 fps,
+  against FFXI's own 30 fps cap. Slower cards or higher resolutions land below that.
 - **A second window:** a "DLSS 5 Feed host" window runs beside the game. It is the 64-bit helper that talks
   to NVIDIA's runtime, which a 32-bit game cannot load.
 - **dgVoodoo2** renders FFXI through Direct3D 11 so ReShade can see the scene's depth.
@@ -45,7 +47,7 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.0\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.1\`.
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder (skip if your `bootloader\host64\` already has them).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
 4. Run `bootloader\host64\dlss5-feed-host64.exe --test` once; expect `300/300 evaluates succeeded`.
@@ -68,23 +70,28 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
   another graphics wrapper.
 - **Added, or replaced when different:** `dlss5-feed.addon32`, `ReshadeEffectShaderToggler.addon32` and
   `.ini`, `FFXI-Clarity.ini`, `presets\`, `ffxi-clarity-shaders\`, `host64\dlss5-feed-host64.exe`,
-  `host64\winmm.dll` (the patched OptiScaler), `host64\nvngx.dll_dlssnr.dll`, and the two NVIDIA DLLs from
-  `Dependencies\` when `host64\` has none.
+  `host64\winmm.dll` (the patched OptiScaler), `host64\nvngx.dll_dlssnr.dll`, the two NVIDIA DLLs from
+  `Dependencies\` when `host64\` has none, and `reshade-shaders\Shaders\DLSS5_Feed.fx` when an existing one is
+  from another Feeder release (the effect must match the shipped add-on). An existing `reshade-shaders\` that
+  already holds the feeder effect stays your effect root; nothing else is required inside it.
 - **Settings it writes:**
   - `dlss5-feed.cfg`: forces `enabled`, `mode`, `reset_every`, `async_home`, `hold_strength`, `mv_scale_x/y`,
     `work_resolution` and `work_upscale` to the tested values, and adds the other tested keys only if missing.
   - `host64\OptiScaler.ini`: the tested file if you have none. An existing one keeps your values; only
     `ResetDlaaHistory=true` and DLSS-NR `Enabled=true` are set in it.
   - `host64\ReShade.ini`: only if missing.
-  - `ReShade.ini`: adds the `ffxi-clarity-shaders` search paths and, unless you already set one, the depth filter.
-    If there is none, it writes a minimal one (F5 overlay, preset `FFXI-Clarity.ini`).
+  - `ReShade.ini`: adds the `ffxi-clarity-shaders` search paths (only its VORT folder when your
+    `reshade-shaders\` already holds the feeder effect, so ReShade never sees two `DLSS5_Feed.fx`), the depth
+    filter unless you already set one, and `RESHADE_DEPTH_INPUT_IS_REVERSED=0` (with upside-down and
+    logarithmic at 0) unless the orientation is already decided there: FFXI's depth is not reversed, and
+    ReShade assumes reversed when nothing says otherwise. If there is none, it writes a minimal one (F5
+    overlay, preset `FFXI-Clarity.ini`).
   - `dgVoodoo.conf`: only if missing (Direct3D 11, no watermark).
 - **Backups:** every file it replaces goes to `FFXI-Clarity-backup-<id>\` with a receipt. `Restore.cmd` puts
   them back and moves the files it added aside; it stops if anything changed since the install.
 - **It refuses, and writes nothing,** when FFXI or the helper is running, a wrapper differs from the tested
   ones, `dgVoodoo.conf` is not Direct3D 11 FL11, another neural consumer (RenoDX, Deep Fried Chicken) is in
-  `host64\`, the NVIDIA DLLs are missing, an existing `reshade-shaders\` already has a `DLSS5_Feed.fx` but not
-  exactly this package's shaders, or a package file fails its hash check.
+  `host64\`, the NVIDIA DLLs are missing, or a package file fails its hash check.
 - **It never** downloads anything, touches drivers or launcher settings, or installs LumeniteFX or Zenteon shaders.
 
 ## Looks
@@ -93,7 +100,11 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
 - `presets\Clarity-Lumenite-Strong.ini`: adds LumeniteFX lighting and Zenteon TurboGI. These
   shaders are **not included**; see [LIGHTING-EXTRAS.md](LIGHTING-EXTRAS.md).
 - `presets\Clarity-Lumenite-QuantMotion.ini`: the current played-on look. LumeniteFX QuantMotion supplies
-  DLSS's motion vectors (provider 4), with Lumenite AO, TRAA and SSSR. Also needs LumeniteFX.
+  DLSS's motion vectors (provider 4), with Lumenite AO, TRAA and SSSR. Also needs LumeniteFX. Known quirk,
+  kept because it is the look that was played and recorded: Lumenite TRAA and SSSR read the `Kernel::` flow,
+  normal and depth textures that only `lumenite_Kernel.fx` writes, and `Lumenite_Kernel` is not enabled in
+  this preset, so TRAA reprojects with zero flow (its sharpening still applies) and SSSR traces against empty
+  guides. Enable `Lumenite_Kernel` above DLSS 5 Feed if you want them fed; it costs GPU time.
 - Neural style: OptiScaler (**F6**) > DLSS-NR > Style: Default, Natural or **Cinematic** (`Style = 2` in
   `host64\OptiScaler.ini`; fresh installs get Cinematic). Cinematic tones down shine and over-processing for
   a film-like look. Press **Save INI** in that menu after changing anything, or it is lost on exit.
@@ -102,7 +113,7 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
 
 | Setup | FPS | Notes |
 |---|---|---|
-| Shipped defaults: 1 neural pass, working scale 0.93, Cinematic | ~27-29 | FFXI caps at 30; neural model ~23 ms/frame |
+| Shipped defaults: 1 neural pass, working scale 0.86, Cinematic | ~27-29 | FFXI caps at 30; neural model ~20 ms/frame (23 ms at 0.93) |
 | 1 pass at 55-71% model resolution (1.1.x tuning) | ~28-30 | smoothest |
 | 2 passes (taper 0.5) at 55-71% | ~22-24 | clear quality jump |
 | 3 passes | ~15 | works, too slow on this card |
@@ -111,6 +122,21 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.2.1** (release candidate; installer and helper verified in isolated installs, not yet played on): fixes two
+  1.2.0 release defects. (1) On a fresh install the helper `host64\dlss5-feed-host64.exe` ran **without
+  ReShade**: OptiScaler's GPU enumeration pinned Windows' `dxgi.dll` into the process before the helper loaded
+  its own, so there was no overlay and no **Ctrl+F9** panel in the game (the helper log said `dxgi.dll here is
+  Windows' own`). The played-on rig escaped this only because its extra `host64\OptiScaler\` libraries slowed
+  OptiScaler's start by about 100 ms. The fork now loads the `dxgi.dll` beside the executable first (fork tag
+  `v1.2.1-ffxi`; new `host64\winmm.dll`, which also ships the **Ctrl+Shift+F3-F6** neural off / style hotkeys
+  the played-on rig already had). (2) The installer refused a working setup whose `reshade-shaders\` held the
+  feeder effect but not VORT, with 21 `Existing shader differs or is incomplete` lines; it refused the very
+  setup this package was tuned on. Now only the feeder effect must match (one from another Feeder release is
+  replaced and backed up), VORT is added from `ffxi-clarity-shaders\`, and a stale `ffxi-clarity-shaders\`
+  copy is refreshed. Also: `ReShade.ini` gets `RESHADE_DEPTH_INPUT_IS_REVERSED=0` when the orientation was
+  never set; the shipped `OptiScaler.ini` is the 2026-10-02 reset default (working scale 0.86, FPS readout on);
+  new Troubleshooting section; installer tests for the compatible-existing, stale-effect, explicit-depth and
+  refusal cases.
 - **1.2.0** (played on 2026-10-02: RTX 4060, driver 616.56, Phoenix and Ashita): DLSS5-Feeder **1.17.0**
   (protocol v11). `dlss5-feed.addon32`, `host64\dlss5-feed-host64.exe` and `DLSS5_Feed.fx` must come from
   the same Feeder release; `tools\known-good.json` now pins all three. Same OptiScaler fork DLL and neural
@@ -133,14 +159,37 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 - DLL: `git clone -b ffxi-clarity --recurse-submodules https://github.com/OpMoonRise2/OptiScaler_DLSSNR`,
   then build `OptiScaler.sln` Release x64 (VS 2022+/v143 or v145). Output `x64\Release\OptiScaler.dll`
-  becomes `host64\winmm.dll`. The shipped `winmm.dll` is built from the source at tag `v1.1.0-ffxi`
-  (identical apart from the embedded commit id). The shipped `nvngx.dll_dlssnr.dll` is the unmodified
+  becomes `host64\winmm.dll`. The shipped `winmm.dll` is built from the source at tag `v1.2.1-ffxi` (its
+  `ProductVersion` carries that commit id and the build time). The shipped `nvngx.dll_dlssnr.dll` is the unmodified
   forwarder from [Dagherbou's release `v0.2.0-patch1`](https://github.com/Dagherbou/OptiScaler_DLSSNR/releases/tag/v0.2.0-patch1).
 - Release zip: `tools\Build-Release.ps1 -StackDir <working, played-on bootloader>`. It refuses to build unless
   the stack's `host64\winmm.dll`, `host64\nvngx.dll_dlssnr.dll`, Feeder pair and `DLSS5_Feed.fx` match
   `tools\known-good.json`, nothing non-redistributable slipped in, and every licence notice is present.
 - Tests: `tools\Test-Installer.ps1 -Package dist\FFXI-DLSS5-Clarity-<version> -NvidiaDir <folder with the two
   NVIDIA DLLs>` installs into throwaway fake bootloaders and checks the result.
+
+## Troubleshooting
+
+Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-host.log` (helper),
+`bootloader\host64\OptiScaler.log` (upscaler and neural pass), `bootloader\ReShade.log` and `host64\ReShade.log`.
+
+- **Helper log: `WARNING: OptiScaler refused the feature-18 requirements query ... builds FSR 2.1.2 in place of
+  DLSS`.** Expected with this stack, on every launch; the Feeder cannot see which upscaler ran and says so in
+  the next lines. `host64\OptiScaler.log` can: `Creating DLSS upscaler feature`, `_CreateFeature result:
+  NVSDK_NGX_Result_Success` and `DLSS v310.9.1 loaded` mean DLSS ran. `fsr` or `xess` there means
+  `nvngx_dlss.dll` is missing from `host64\`.
+- **Helper log: `neural consumer outcome: consumer did not intercept`.** Also expected: OptiScaler reaches the
+  neural model through its own forwarder, where the Feeder's probe cannot see it. `OptiScaler.log` shows
+  `DLSS-NR forwarder loaded`, `MULTIPASS: evaluated 1 passes successfully` and `DLSS-NR cost: ... ms`.
+- **Helper log: `dxgi.dll here is Windows' own`.** 1.2.0 did this on fresh installs (see Changes). With 1.2.1's
+  `winmm.dll` the helper log reads `dxgi.dll: ...\host64\dxgi.dll`, `OptiScaler.log` has `dxgi.dll loaded from
+  the application folder`, and `host64\ReShade.log` exists. If not, report it with those three logs.
+- **Depth looks wrong** (effects on the sky, or the `DLSS5_Feed_Debug` raw-depth view is inverted). `ReShade.ini`
+  `PreprocessorDefinitions` must contain `RESHADE_DEPTH_INPUT_IS_REVERSED=0`; `DisplayDepth.fx` should show near
+  objects dark. `host64\OptiScaler.ini` keeps `[InitFlags] DepthInverted = false`.
+- **1.2.0 refused with `Existing shader differs or is incomplete` lines.** Fixed in 1.2.1; nothing to change.
+- **No neural effect after a hotkey.** Ctrl+Shift+F3 is the neural-off comparison key; Ctrl+Shift+F6 brings
+  Cinematic back. Hotkey changes are not saved: the `OptiScaler.ini` values return at the next start.
 
 ## Status
 
