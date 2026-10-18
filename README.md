@@ -141,7 +141,8 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
-- **1.2.1** (release candidate; installer and helper verified in isolated installs, not yet played on): fixes two
+- **1.2.1** (played on 2026-10-17: RTX 4060, driver 616.56, Ashita; installer and helper also verified in
+  isolated installs): fixes two
   1.2.0 release defects. (1) On a fresh install the helper `host64\dlss5-feed-host64.exe` ran **without
   ReShade**: OptiScaler's GPU enumeration pinned Windows' `dxgi.dll` into the process before the helper loaded
   its own, so there was no overlay and no **Ctrl+F9** panel in the game (the helper log said `dxgi.dll here is
@@ -157,8 +158,9 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
   new Troubleshooting section; installer tests for the compatible-existing, stale-effect, explicit-depth and
   refusal cases. Settings access: Insert now opens OptiScaler in the helper alongside the configured key (F6),
   matching what the helper itself tells users; the helper's title bar names the real key; `cast_key=0` in an
-  existing `dlss5-feed.cfg` (Ctrl+F9 off) is set back to Ctrl+F9; new Shortcuts table. Played on 2026-10-17
-  (Ashita, LSB, RTX 4060, 616.56): ReShade in both processes, DLSS 310.9.1, depth reversed=0, ~29 fps.
+  existing `dlss5-feed.cfg` (Ctrl+F9 off) is set back to Ctrl+F9; new Shortcuts table. In game: ReShade in
+  both processes, DLSS 310.9.1 DLAA plus the neural pass, depth reversed=0, ~29 fps, and Ctrl+F9, F6/Insert
+  and the Ctrl+Shift hotkeys working.
 - **1.2.0** (played on 2026-10-02: RTX 4060, driver 616.56, Phoenix and Ashita): DLSS5-Feeder **1.17.0**
   (protocol v11). `dlss5-feed.addon32`, `host64\dlss5-feed-host64.exe` and `DLSS5_Feed.fx` must come from
   the same Feeder release; `tools\known-good.json` now pins all three. Same OptiScaler fork DLL and neural
