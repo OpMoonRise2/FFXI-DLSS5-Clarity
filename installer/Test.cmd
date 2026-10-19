@@ -9,8 +9,12 @@ if not exist "%HOST%" (
 )
 "%HOST%" --test
 echo.
+rem The result goes to the helper log, not to this window.
+echo Result (from host64\dlss5-feed-host.log):
+findstr /C:"--test finished" /C:"--test: neural" "%~dp0..\host64\dlss5-feed-host.log"
+echo.
 echo Expected: 300/300 evaluates succeeded. Anything else points at the GPU, the driver or the two NVIDIA DLLs.
-echo Whether the DLSS 5 neural pass runs shows in the game, not here: after playing a minute,
-echo host64\OptiScaler.log has "DLSS-NR cost" lines. "create failed ... FeatureNotSupported" there means
+echo The neural line shows whether the DLSS 5 neural model was created. In the game, host64\OptiScaler.log
+echo confirms it: "DLSS-NR cost" lines mean it runs; "create failed ... FeatureNotSupported" means
 echo nvngx_dlssnr.dll is the RTX 50-only build (see README.md, Troubleshooting).
 pause
