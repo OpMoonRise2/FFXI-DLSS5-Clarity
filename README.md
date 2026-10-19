@@ -47,7 +47,7 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.1\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.2\`.
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder (skip if your `bootloader\host64\` already has them).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
 4. Run `bootloader\host64\dlss5-feed-host64.exe --test` once; expect `300/300 evaluates succeeded`.
@@ -82,9 +82,10 @@ MSAA off: with MSAA on, the Shader Toggler can no longer keep the effects off th
 
 It works only inside the bootloader folder it is pointed at (by default, the bootloader the package folder sits in).
 
-- **Installed if missing, kept if identical, otherwise the install is refused:** `d3d8.dll` (dgVoodoo; one
-  other tested build is also accepted), `dxgi.dll` and `host64\dxgi.dll` (ReShade). It never overwrites
-  another graphics wrapper.
+- **Wrappers: installed if missing, kept if identical, replaced if another build:** `d3d8.dll` (dgVoodoo; one
+  other tested build is also kept), `dxgi.dll` and `host64\dxgi.dll` (ReShade). Another dgVoodoo or ReShade
+  build (from a launcher or another mod such as Deep Fried Chicken) is backed up and replaced by the tested one.
+  A file that is some other wrapper is never overwritten: `Check.cmd` says which file to move aside.
 - **Added, or replaced when different:** `dlss5-feed.addon32`, `ReshadeEffectShaderToggler.addon32` and
   `.ini`, `FFXI-Clarity.ini`, `presets\`, `ffxi-clarity-shaders\`, `host64\dlss5-feed-host64.exe`,
   `host64\winmm.dll` (the patched OptiScaler), `host64\nvngx.dll_dlssnr.dll`, the two NVIDIA DLLs from
@@ -104,12 +105,14 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
     logarithmic at 0) unless the orientation is already decided there: FFXI's depth is not reversed, and
     ReShade assumes reversed when nothing says otherwise. If there is none, it writes a minimal one (F5
     overlay, preset `FFXI-Clarity.ini`).
-  - `dgVoodoo.conf`: only if missing (Direct3D 11, no watermark).
+  - `dgVoodoo.conf`: written if missing (Direct3D 11, no watermark); an existing one set to another output API
+    (for example D3D12) gets `OutputAPI = d3d11_fl11_0`, everything else kept.
 - **Backups:** every file it replaces goes to `FFXI-Clarity-backup-<id>\` with a receipt. `Restore.cmd` puts
   them back and moves the files it added aside; it stops if anything changed since the install.
-- **It refuses, and writes nothing,** when FFXI or the helper is running, a wrapper differs from the tested
-  ones, `dgVoodoo.conf` is not Direct3D 11 FL11, another neural consumer (RenoDX, Deep Fried Chicken) is in
-  `host64\`, the NVIDIA DLLs are missing, or a package file fails its hash check.
+- **It refuses, and writes nothing,** when FFXI or the helper is running, `d3d8.dll` / `dxgi.dll` belong to
+  another wrapper (not dgVoodoo / ReShade), `dgVoodoo.conf` is in dgVoodoo's binary format, another neural
+  consumer (RenoDX, Deep Fried Chicken) is in `host64\`, the NVIDIA DLLs are missing, or a package file fails
+  its hash check. Each `NEEDED:` line in `Check.cmd` names the file and what to do.
 - **It never** downloads anything, touches drivers or launcher settings, or installs LumeniteFX or Zenteon shaders.
 
 ## Looks
@@ -141,6 +144,12 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.2.2** (installer only; same binaries and settings as 1.2.1): no more dead end for setups coming from
+  another mod or launcher. 1.2.1 refused any other dgVoodoo or ReShade build with `Existing d3d8.dll differs from
+  the tested stack ... requires wrapper integration`, which told users nothing they could act on. Now another
+  build of the same wrapper is backed up and replaced (Restore.cmd puts it back), a text `dgVoodoo.conf` on D3D12
+  or another output API is switched to D3D11 FL11, and every remaining refusal names the file and the fix (move
+  the other wrapper or `host64\deep-fried-chicken*.addon64` aside, run Check.cmd again). New installer tests.
 - **1.2.1** (release candidate; installer and helper verified in isolated installs, not yet played on): fixes two
   1.2.0 release defects. (1) On a fresh install the helper `host64\dlss5-feed-host64.exe` ran **without
   ReShade**: OptiScaler's GPU enumeration pinned Windows' `dxgi.dll` into the process before the helper loaded
@@ -210,6 +219,11 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
   `PreprocessorDefinitions` must contain `RESHADE_DEPTH_INPUT_IS_REVERSED=0`; `DisplayDepth.fx` should show near
   objects dark. `host64\OptiScaler.ini` keeps `[InitFlags] DepthInverted = false`.
 - **1.2.0 refused with `Existing shader differs or is incomplete` lines.** Fixed in 1.2.1; nothing to change.
+- **1.2.1 refused with `Existing d3d8.dll differs from the tested stack`** (or `dxgi.dll`). Fixed in 1.2.2:
+  another dgVoodoo / ReShade build is replaced (backed up). With 1.2.1, move that file out of `bootloader\`
+  and run `Check.cmd` again; the installer then puts in the tested one.
+- **Coming from Deep Fried Chicken.** Move `host64\deep-fried-chicken*.addon64` out of `host64\` (keep it to
+  switch back) and run `Check.cmd`. Its dgVoodoo / ReShade files are replaced and backed up by `Install.cmd`.
 - **Ctrl+F9 does nothing.** Click the game first (it is read by the game). `bootloader\dlss5-feed.log` shows
   `cast_key=` in its `config:` line; 0 means off. Re-run `Install.cmd` or set `cast_key=120` and `cast_mods=2`.
 - **The OptiScaler menu does not open.** The key goes to the helper window, not the game: Alt+Tab to "DLSS 5

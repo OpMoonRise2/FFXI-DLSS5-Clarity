@@ -61,25 +61,40 @@ foreach($name in @('nvngx_dlss.dll','nvngx_dlssnr.dll')){
     if(Test-Path -LiteralPath $installed){$runtime[$name]=$installed}elseif(Test-Path -LiteralPath $supplied){$runtime[$name]=$supplied}else{$problems.Add("Supply Dependencies\$name (see README.md, Requirements)")}
     if($runtime.ContainsKey($name) -and !(IsX64 $runtime[$name])){$problems.Add("$name must be a valid x64 DLL.")}
 }
-$preserveWrappers=@{}
+$preserveWrappers=@{};$replacedWrappers=[Collections.Generic.List[string]]::new()
 # Previously working Ashita control: dgVoodoo 4.8.2.134, D3D11 FL11.
 # Match exact reviewed bytes, not just spoofable version metadata.
 $knownD3d8=@('85284D3024D6AD7D4B4154CD96B97E0D64F28F6A0F7AD490E5BE70D626F62604')
+# Another build of the same wrapper (a launcher's or another mod's dgVoodoo / ReShade) is replaced by the tested
+# one and backed up like any replaced file. Metadata only decides "same product" here, never "keep it": a file
+# that is some other wrapper is still never overwritten. 1.2.1 refused every other dgVoodoo / ReShade build.
 foreach($pair in @(@('d3d8.dll','dgVoodoo'),@('dxgi.dll','ReShade'),@('host64\dxgi.dll','ReShade'))){
     $p=SafePath $root $pair[0]
     if(Test-Path -LiteralPath $p){
         $hash=Hash $p
         if($hash -eq $manifest.Files.('payload\'+$pair[0])){$preserveWrappers[$pair[0]]=$true}
         elseif($pair[0] -eq 'd3d8.dll' -and $hash -in $knownD3d8){$preserveWrappers[$pair[0]]=$true}
-        else{$problems.Add("Existing $($pair[0]) differs from the tested stack. Automatic replacement refused; requires wrapper integration.")}
+        else{
+            $v=(Get-Item -LiteralPath $p).VersionInfo
+            if($v.ProductName -eq $pair[1]){$replacedWrappers.Add("Existing $($pair[0]) is $($pair[1]) $($v.ProductVersion), not the tested build: Install replaces it with the tested one (backed up; Restore.cmd puts it back).")}
+            else{$problems.Add("Existing $($pair[0]) is not $($pair[1]), so it belongs to another graphics wrapper or mod and is never overwritten. Move it out of $root (keep a copy to switch back), then run Check.cmd again.")}
+        }
     }
 }
-$dg=ReadText (SafePath $root 'dgVoodoo.conf')
-if($dg -and $dg -notmatch '(?im)^\s*OutputAPI\s*=\s*d3d11_fl11_0\s*$'){$problems.Add('Existing dgVoodoo.conf is not the tested D3D11 feature-level-11 path; configure it before installing.')}
+# dgVoodoo.conf: a text config set to anything but D3D11 FL11 is switched to it (backed up). Only the binary form,
+# which this script cannot edit safely, still needs dgVoodooCpl.exe.
+$dg=ReadText (SafePath $root 'dgVoodoo.conf');$dgFixed=$null
+if($dg -and $dg -notmatch '(?im)^\s*OutputAPI\s*=\s*d3d11_fl11_0\s*$'){
+    if($dg -match '(?im)^\s*OutputAPI\s*='){$dgFixed=$dg -replace '(?im)^(\s*OutputAPI\s*=)[^\r\n]*','${1} d3d11_fl11_0'}
+    elseif($dg -match '(?im)^\s*\[General\]\s*$'){$dgFixed=SetIni $dg 'General' 'OutputAPI' 'd3d11_fl11_0'}
+    else{$problems.Add('dgVoodoo.conf is not a text config this installer can edit. Run dgVoodooCpl.exe, set Output API to "Direct3D 11 (feature level 11.0)" and MSAA off, Apply, then run Check.cmd again.')}
+}
 $conflicts=@(Get-ChildItem -LiteralPath (Join-Path $root 'host64') -File -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^(renodx-dlss.*|deep-fried-chicken.*)\.addon64$'})
-if($conflicts.Count){$problems.Add('Another neural consumer is active in host64. Disable it before using OptiScaler.')}
+foreach($c in $conflicts){$problems.Add("host64\$($c.Name) is another neural consumer (RenoDX / Deep Fried Chicken) and would fight OptiScaler for the neural pass. Move it out of host64 (put it back to switch back), then run Check.cmd again.")}
 Write-Output "FFXI Clarity portable preflight: $root"
-if($problems.Count){$problems | ForEach-Object {Write-Output "NEEDED: $_"};if($Action -eq 'Install'){throw 'No installation files changed.'};return}
+if($problems.Count){$problems | ForEach-Object {Write-Output "NEEDED: $_"};Write-Output 'Nothing was changed. Fix the NEEDED lines above and run Check.cmd again.';if($Action -eq 'Install'){throw 'No installation files changed.'};return}
+$replacedWrappers | ForEach-Object {Write-Output $_}
+if($dgFixed){Write-Output 'dgVoodoo.conf is not set to Direct3D 11 feature level 11: Install sets OutputAPI = d3d11_fl11_0 (backed up). Phoenix launcher rewrites this file every launch: set its graphics output to D3D11 there too.'}
 Write-Output 'File prerequisites passed. GPU, driver and live rendering still require the host test and gameplay check.'
 if($reuseShaders){
     if($staleFeed){Write-Output 'Existing reshade-shaders\Shaders\DLSS5_Feed.fx is from another Feeder release: Install replaces it (backed up) so it matches the shipped dlss5-feed.addon32.'}
@@ -154,6 +169,7 @@ if($DepthFilter -gt 0 -and ($depthIsFresh -or $PSBoundParameters.ContainsKey('De
     $rs=SetIni $rs 'DEPTH' 'UseAspectRatioHeuristics' '4'
 }
 $changes['ReShade.ini']=@{Text=$rs}
+if($dgFixed){$changes['dgVoodoo.conf']=@{Text=$dgFixed}}
 if(!$dg){$changes['dgVoodoo.conf']=@{Text="[General]`r`nOutputAPI=d3d11_fl11_0`r`nFullScreenMode=false`r`n[DirectX]`r`nResolution=unforced`r`ndgVoodooWatermark=false`r`n"}}
 $backupDir=Join-Path $root ('FFXI-Clarity-backup-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($backupDir)

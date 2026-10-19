@@ -81,6 +81,23 @@ Assert ((Get-Content -Raw "$d\ReShade.ini") -match 'FilterResolutionWidth=2048')
 $u = Fixture 'unknown wrapper'; [IO.File]::WriteAllText("$u\d3d8.dll", 'x')
 $refused = $false; try { & $setup -Action Install -Target $u | Out-Null } catch { $refused = $true }
 Assert ($refused -and !(Test-Path "$u\host64\winmm.dll")) 'unknown wrapper: refused, no writes'
+Assert (((& $setup -Action Check -Target $u) -join "`n") -match 'NEEDED: Existing d3d8.dll is not dgVoodoo.*Move it out') 'unknown wrapper: Check says to move it aside'
+
+# 4b. Another dgVoodoo / ReShade build (a launcher's, Deep Fried Chicken's): replaced with a backup, Restore undoes it.
+#     1.2.1 refused these with "differs from the tested stack". Same version resource, different bytes.
+$w = Fixture 'other wrapper builds'
+foreach ($rel in 'd3d8.dll','dxgi.dll','host64\dxgi.dll') {
+    $b = [IO.File]::ReadAllBytes((Join-Path $Package "payload\$rel")); [IO.File]::WriteAllBytes("$w\$rel", $b + [byte[]](1,2,3))
+}
+$before = Hash "$w\d3d8.dll"
+$chk = (& $setup -Action Check -Target $w) -join "`n"
+Assert ($chk -notmatch 'NEEDED' -and $chk -match 'd3d8.dll is dgVoodoo .*Install replaces it' -and $chk -match 'host64\\dxgi.dll is ReShade .*Install replaces it') 'other builds: preflight passes and announces the replacements'
+& $setup -Action Install -Target $w | Out-Null
+Assert ((Hash "$w\d3d8.dll") -eq (Hash (Join-Path $Package 'payload\d3d8.dll')) -and (Hash "$w\host64\dxgi.dll") -eq (Hash (Join-Path $Package 'payload\host64\dxgi.dll'))) 'other builds: tested wrappers installed'
+$bk = (Get-ChildItem $w -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+Assert ((Hash "$bk\d3d8.dll") -eq $before) 'other builds: original d3d8.dll backed up'
+& $setup -Action Restore -Target $w -Backup $bk | Out-Null
+Assert ((Hash "$w\d3d8.dll") -eq $before) 'other builds: restore put the original d3d8.dll back'
 $n = Fixture 'no nvidia' -NoNvidia
 $refused = $false; try { & $setup -Action Install -Target $n | Out-Null } catch { $refused = $true }
 Assert ($refused -and !(Test-Path "$n\host64\winmm.dll")) 'missing NVIDIA DLLs: refused, no writes'
@@ -135,13 +152,21 @@ $o = Fixture 'explicit depth'
 & $setup -Action Install -Target $o | Out-Null
 Assert ((Get-Content -Raw "$o\ReShade.ini") -match '(?m)^PreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=1\r?$') 'explicit depth orientation kept'
 
-# 9. Genuine conflicts still refuse with no writes: D3D12 dgVoodoo, another neural consumer
-$x = Fixture 'd3d12 dgvoodoo'; [IO.File]::WriteAllText("$x\dgVoodoo.conf", "[General]`r`nOutputAPI = d3d12_fl11_0`r`n")
-$refused = $false; try { & $setup -Action Install -Target $x | Out-Null } catch { $refused = $true }
-Assert ($refused -and !(Test-Path "$x\host64\winmm.dll") -and !(Get-ChildItem $x -Directory -Filter 'FFXI-Clarity-backup-*')) 'D3D12 dgVoodoo.conf: refused, no writes'
-$y = Fixture 'neural consumer'; [IO.File]::WriteAllText("$y\host64\renodx-dlss5.addon64", 'x')
+# 9. A D3D12 text dgVoodoo.conf is switched to D3D11 FL11 (backed up); a binary one and another neural consumer
+#    still refuse with no writes, naming what to do.
+$x = Fixture 'd3d12 dgvoodoo'; [IO.File]::WriteAllText("$x\dgVoodoo.conf", "[General]`r`nOutputAPI                            = d3d12_fl11_0`r`nFullScreenMode = false`r`n")
+Assert (((& $setup -Action Check -Target $x) -join "`n") -match 'Install sets OutputAPI = d3d11_fl11_0') 'D3D12 dgVoodoo.conf: preflight announces the fix'
+& $setup -Action Install -Target $x | Out-Null
+$dgc = Get-Content -Raw "$x\dgVoodoo.conf"
+Assert ($dgc -match '(?m)^OutputAPI\s*= d3d11_fl11_0\r?$' -and $dgc -match 'FullScreenMode = false' -and (Test-Path "$x\host64\winmm.dll")) 'D3D12 dgVoodoo.conf: set to D3D11 FL11, other keys kept, installed'
+Assert ((Get-Content -Raw "$x\FFXI-Clarity-backup-*\dgVoodoo.conf") -match 'd3d12_fl11_0') 'D3D12 dgVoodoo.conf: original backed up'
+$xb = Fixture 'binary dgvoodoo'; [IO.File]::WriteAllBytes("$xb\dgVoodoo.conf", [byte[]](0x44,0x47,0x56,0,1,0,0,0))
+$refused = $false; try { & $setup -Action Install -Target $xb | Out-Null } catch { $refused = $true }
+Assert ($refused -and !(Test-Path "$xb\host64\winmm.dll") -and !(Get-ChildItem $xb -Directory -Filter 'FFXI-Clarity-backup-*')) 'binary dgVoodoo.conf: refused, no writes'
+$y = Fixture 'neural consumer'; [IO.File]::WriteAllText("$y\host64\deep-fried-chicken.addon64", 'x')
 $refused = $false; try { & $setup -Action Install -Target $y | Out-Null } catch { $refused = $true }
 Assert ($refused -and !(Test-Path "$y\host64\winmm.dll")) 'other neural consumer in host64: refused, no writes'
+Assert (((& $setup -Action Check -Target $y) -join "`n") -match 'host64\\deep-fried-chicken.addon64 is another neural consumer.*Move it out of host64') 'other neural consumer: Check names the file to move'
 
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'
