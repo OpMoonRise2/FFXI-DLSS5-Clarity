@@ -62,7 +62,7 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.6\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.7\`.
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder. You can skip this if your `bootloader\host64\` already
    has them; a file you put in `Dependencies\` replaces a different one in `host64\` (backed up).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
@@ -165,6 +165,9 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.2.7** (documentation only; same binaries, installer and settings as 1.2.6): adds `DISCLAIMER.md`
+  (as-is, assumption of risk, limitation of liability, no affiliation) to the package and a use-at-your-own-risk
+  notice at the top of the README.
 - **1.2.6** (installer and support tools; same binaries and settings as 1.2.5): 1.2.5's check for NVIDIA's
   original `nvngx_dlssnr.dll` could be skipped. When `Check.cmd` / `Install.cmd` were started from PowerShell 7 (or a
   tool that passes on its environment), Windows PowerShell could not load the signature check and treated the
