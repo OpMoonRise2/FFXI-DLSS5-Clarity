@@ -10,6 +10,10 @@ function Get-Process { param($Name, $ErrorAction) @() }   # fixtures only: ignor
 $global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4060'); $global:ClarityFakeRegistryGpus = @()
 function Get-CimInstance { param($ClassName, $ErrorAction) if ($global:ClarityFakeGpus -contains 'THROW') { throw 'WMI unavailable' }; $global:ClarityFakeGpus | ForEach-Object { [pscustomobject]@{ Name = $_ } } }
 function Get-ItemProperty { param($Path, $ErrorAction) $global:ClarityFakeRegistryGpus | ForEach-Object { [pscustomobject]@{ DriverDesc = $_ } } }
+# Fixtures only: the signature status of an nvngx_dlssnr.dll that is not recognised by hash (Valid = NVIDIA's original,
+# HashMismatch = a modified build). THROW stands for a session where the cmdlet cannot load.
+$global:ClarityFakeSignature = 'HashMismatch'
+function Get-AuthenticodeSignature { param($LiteralPath, $ErrorAction) if ($global:ClarityFakeSignature -eq 'THROW') { throw 'cmdlet unavailable' }; [pscustomobject]@{ Status = $global:ClarityFakeSignature } }
 function Fixture($n, [switch]$NoNvidia) {
     $p = Join-Path $root $n; New-Item -ItemType Directory (Join-Path $p 'host64') -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'fixture.exe'), 'not a real exe')
@@ -234,6 +238,54 @@ $chk = (& $setup -Action Check -Target $gp) -join "`n"
 Assert ($chk -match 'WARNING: Windows did not report a graphics card' -and $chk -match 'File prerequisites passed') 'no adapter reported at all: warns, does not block'
 $global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4060')
 
-Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus -Scope Global
+# 12. nvngx_dlssnr.dll build (2026-10-19 report: an RTX 4070 Ti with NVIDIA's original 310.8.0 got DLAA only, with
+#     FAIL_FeatureNotSupported in OptiScaler.log). The original runs the neural pass on RTX 50 only, so on a
+#     confirmed RTX 20/30/40 it is refused unless -AllowDlaaOnly; a Dependencies\ copy replaces a different host64\ one.
+#     Another build is made by appending bytes to the tested one (still a valid x64 DLL, different hash).
+function OtherDlssNr($p) { Copy-Item (Join-Path $NvidiaDir 'nvngx_dlssnr.dll') $p -Force; $s = [IO.File]::Open($p, 'Append'); try { $s.Write([byte[]](7,7,7), 0, 3) } finally { $s.Dispose() } }
+$global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4070 Ti')
+$t = Fixture 'dlssnr tested'
+$chk = (& $setup -Action Check -Target $t) -join "`n"
+Assert ($chk -match 'File prerequisites passed' -and $chk -notmatch 'nvngx_dlssnr') 'dlssnr tested build on RTX 40: passes, nothing to say'
+$o = Fixture 'dlssnr original'; OtherDlssNr "$o\host64\nvngx_dlssnr.dll"; $global:ClarityFakeSignature = 'Valid'
+$chk = (& $setup -Action Check -Target $o) -join "`n"
+Assert ($chk -match "NEEDED: host64\\nvngx_dlssnr.dll is NVIDIA's original build.*RTX 4070 Ti.*DLAA only.*Dependencies\\.*Install.cmd -AllowDlaaOnly") 'dlssnr original on RTX 40: Check refuses, names the card, the fix and the override'
+$refused = $false; try { & $setup -Action Install -Target $o | Out-Null } catch { $refused = $true }
+Assert ($refused -and !(Test-Path "$o\host64\winmm.dll") -and !(Get-ChildItem $o -Directory -Filter 'FFXI-Clarity-backup-*')) 'dlssnr original on RTX 40: install refused, no writes'
+$out = (& $setup -Action Install -Target $o -AllowDlaaOnly) -join "`n"
+Assert ((Test-Path "$o\host64\winmm.dll") -and $out -match "WARNING: host64\\nvngx_dlssnr.dll is NVIDIA's original build.*-AllowDlaaOnly") 'dlssnr original + -AllowDlaaOnly: installed with a warning'
+$global:ClarityFakeGpus = @('NVIDIA GeForce RTX 5080')
+$chk = (& $setup -Action Check -Target $o) -join "`n"
+Assert ($chk -match 'File prerequisites passed' -and $chk -notmatch 'nvngx_dlssnr') 'dlssnr original on RTX 50: passes, nothing to say'
+foreach ($g in 'NVIDIA RTX A4000','NVIDIA TITAN RTX') {
+    $global:ClarityFakeGpus = @($g); $chk = (& $setup -Action Check -Target $o) -join "`n"
+    Assert ($chk -match "WARNING: host64\\nvngx_dlssnr.dll is NVIDIA's original build" -and $chk -match 'File prerequisites passed') "dlssnr original on $g (generation not known): warns, does not block"
+}
+$global:ClarityFakeGpus = @('NVIDIA GeForce RTX 3060'); $global:ClarityFakeSignature = 'HashMismatch'
+$m = Fixture 'dlssnr other modified'; OtherDlssNr "$m\host64\nvngx_dlssnr.dll"
+$chk = (& $setup -Action Check -Target $m) -join "`n"
+Assert ($chk -match 'File prerequisites passed' -and $chk -match 'nvngx_dlssnr.dll is not the tested build' -and $chk -notmatch 'NEEDED|WARNING') 'dlssnr other modified build on RTX 30: passes with a note'
+$global:ClarityFakeSignature = 'THROW'
+$chk = (& $setup -Action Check -Target $m) -join "`n"
+Assert ($chk -match 'File prerequisites passed' -and $chk -match 'not the tested build' -and $chk -notmatch 'NEEDED') 'dlssnr unknown build, signature cmdlet unavailable: passes with a note'
+# Dependencies\ wins over a different host64\ copy: the user follows the fix and Install replaces the bad one
+$global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4070 Ti'); $global:ClarityFakeSignature = 'Valid'
+$r = Fixture 'dlssnr replaced'; OtherDlssNr "$r\host64\nvngx_dlssnr.dll"; $bad = Hash "$r\host64\nvngx_dlssnr.dll"
+$deps = Join-Path $Package 'Dependencies'; $depFile = Join-Path $deps 'nvngx_dlssnr.dll'
+if (Test-Path -LiteralPath $depFile) { throw "The package under test already has $depFile; remove it first." }
+New-Item -ItemType Directory $deps -Force | Out-Null; Copy-Item (Join-Path $NvidiaDir 'nvngx_dlssnr.dll') $depFile
+try {
+    $chk = (& $setup -Action Check -Target $r) -join "`n"
+    Assert ($chk -notmatch 'NEEDED' -and $chk -match 'Dependencies\\nvngx_dlssnr.dll differs from host64\\nvngx_dlssnr.dll: Install replaces it') 'Dependencies dlssnr: Check announces the replacement, no refusal'
+    & $setup -Action Install -Target $r | Out-Null
+    Assert ((Hash "$r\host64\nvngx_dlssnr.dll") -eq (Hash $depFile)) 'Dependencies dlssnr: host64 copy replaced'
+    $bk = (Get-ChildItem $r -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+    Assert ((Hash "$bk\host64\nvngx_dlssnr.dll") -eq $bad) 'Dependencies dlssnr: old host64 copy backed up'
+    & $setup -Action Restore -Target $r -Backup $bk | Out-Null
+    Assert ((Hash "$r\host64\nvngx_dlssnr.dll") -eq $bad) 'Dependencies dlssnr: restore put the old copy back'
+} finally { Remove-Item -LiteralPath $depFile -Force }
+$global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4060'); $global:ClarityFakeSignature = 'HashMismatch'
+
+Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus, ClarityFakeSignature -Scope Global
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'
