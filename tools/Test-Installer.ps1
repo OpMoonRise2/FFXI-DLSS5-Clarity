@@ -168,5 +168,28 @@ $refused = $false; try { & $setup -Action Install -Target $y | Out-Null } catch 
 Assert ($refused -and !(Test-Path "$y\host64\winmm.dll")) 'other neural consumer in host64: refused, no writes'
 Assert (((& $setup -Action Check -Target $y) -join "`n") -match 'host64\\deep-fried-chicken.addon64 is another neural consumer.*Move it out of host64') 'other neural consumer: Check names the file to move'
 
+# 10. CollectLogs: one zip with logs, file list and Check output; user name scrubbed, binary config intact, install untouched
+$cl = Fixture 'collect logs'; Copy-Item "$xb\dgVoodoo.conf" "$cl\dgVoodoo.conf"; Copy-Item "$y\host64\deep-fried-chicken.addon64" "$cl\host64\"
+[IO.File]::WriteAllText("$cl\dlss5-feed.log", "host game: C:\Users\$env:USERNAME\Ashita\bootloader\xiloader.exe`r`n")
+[IO.File]::WriteAllText("$cl\host64\OptiScaler.log", "DLSS v310.9.1 loaded`r`n")
+$before = (Get-ChildItem $cl -Recurse -File | ForEach-Object { "$($_.FullName)|$(Hash $_.FullName)" }) -join "`n"
+$clOut = Join-Path $root 'collect out'; $env:CLARITY_NO_EXPLORER = '1'
+& (Join-Path $Package 'CollectLogs.ps1') -Target $cl -OutDir $clOut | Out-Null
+Remove-Item Env:\CLARITY_NO_EXPLORER
+$after = (Get-ChildItem $cl -Recurse -File | ForEach-Object { "$($_.FullName)|$(Hash $_.FullName)" }) -join "`n"
+Assert ($before -eq $after) 'collect: install folder unchanged'
+$zipPath = @(Get-ChildItem $clOut -Filter 'FFXI-Clarity-support-*.zip')
+Assert ($zipPath.Count -eq 1) 'collect: one support zip written'
+$unz = Join-Path $root 'collect unzipped'; Add-Type -AssemblyName System.IO.Compression.FileSystem
+$za = [IO.Compression.ZipFile]::OpenRead($zipPath[0].FullName); $names = @($za.Entries | ForEach-Object FullName); $za.Dispose()
+Assert (!($names -match '\\')) 'collect: zip paths use forward slashes'
+[IO.Compression.ZipFile]::ExtractToDirectory($zipPath[0].FullName, $unz)
+Assert ((Test-Path "$unz\files\host64\OptiScaler.log") -and (Test-Path "$unz\check.txt") -and (Test-Path "$unz\system.txt") -and (Test-Path "$unz\crashes.txt")) 'collect: logs, Check output, system and crash records included'
+$feed = Get-Content -Raw "$unz\files\dlss5-feed.log"
+Assert ($feed -match 'C:\\Users\\<user>\\Ashita' -and $feed -notmatch [regex]::Escape("\$env:USERNAME\")) 'collect: Windows user name scrubbed from logs'
+Assert ((Hash "$unz\files\dgVoodoo.conf") -eq (Hash "$cl\dgVoodoo.conf")) 'collect: binary dgVoodoo.conf copied byte for byte'
+Assert ((Get-Content -Raw "$unz\installed-files.txt") -match 'host64\\deep-fried-chicken.addon64') 'collect: file list shows another mod in host64'
+Assert ((Get-Content -Raw "$unz\check.txt") -match 'deep-fried-chicken') 'collect: Check output names the conflict'
+
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'

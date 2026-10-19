@@ -54,6 +54,8 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 5. Launch FFXI. A second window, "DLSS 5 Feed host", opens beside the game. See [Shortcuts](#shortcuts) for
    how to open each settings menu.
 
+Something not working? Run `CollectLogs.cmd` and see [Reporting a problem](#reporting-a-problem).
+
 ## Shortcuts
 
 Where you press a key matters: the game window and the "DLSS 5 Feed host" helper window are two programs.
@@ -144,6 +146,10 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **Next release** (support tools only; same binaries, settings and installer behaviour as 1.2.2):
+  `CollectLogs.cmd` saves one zip with every log, config, the installed-file list with versions, `Check.cmd`'s
+  output, GPU/driver and recent crash records (Windows user name removed), so a problem report needs one
+  attachment. GitHub issue form, and a crash-on-launch entry in Troubleshooting.
 - **1.2.2** (installer only; same binaries and settings as 1.2.1): no more dead end for setups coming from
   another mod or launcher. 1.2.1 refused any other dgVoodoo or ReShade build with `Existing d3d8.dll differs from
   the tested stack ... requires wrapper integration`, which told users nothing they could act on. Now another
@@ -203,6 +209,19 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-host.log` (helper),
 `bootloader\host64\OptiScaler.log` (upscaler and neural pass), `bootloader\ReShade.log` and `host64\ReShade.log`.
+`CollectLogs.cmd` gathers all of them (see [Reporting a problem](#reporting-a-problem)).
+
+- **The game crashes or closes on launch.** First run `Restore.cmd` if you need to play now: it puts your previous
+  files back. Then, one at a time:
+  1. Run `bootloader\host64\dlss5-feed-host64.exe --test`. Anything but `300/300 evaluates succeeded` points at
+     the GPU, the driver or the two NVIDIA DLLs in `host64\`, not at the game.
+  2. Look for leftovers from another graphics mod (DLSS 5 Manager, a standalone DLSS5-Feeder, Deep Fried
+     Chicken, RenoDX): any `.addon32`, `.addon64` or `.asi` in `bootloader\` or `host64\` that is not in
+     [What the installer changes](#what-the-installer-changes) belongs to something else. Move it out (keep it
+     to switch back) and launch again. `installed-files.txt` in the `CollectLogs` zip lists every file with
+     its product name.
+  3. `crashes.txt` in the `CollectLogs` zip shows Windows' crash records. `Faulting module name` names the DLL
+     that crashed; include it when you report the problem.
 
 - **Helper log: `WARNING: OptiScaler refused the feature-18 requirements query ... builds FSR 2.1.2 in place of
   DLSS`.** Expected with this stack, on every launch; the Feeder cannot see which upscaler ran and says so in
@@ -234,9 +253,20 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
 - **No neural effect after a hotkey.** Ctrl+Shift+F3 is the neural-off comparison key; Ctrl+Shift+F6 brings
   Cinematic back. Hotkey changes are not saved: the `OptiScaler.ini` values return at the next start.
 
+## Reporting a problem
+
+1. Run `CollectLogs.cmd` from the `FFXI-DLSS5-Clarity-<version>` folder, right after the problem and before
+   launching again (the logs are rewritten on each start). It changes nothing and saves
+   `FFXI-Clarity-support-<date>.zip` on your desktop: the logs and configs above, the list of files in
+   `bootloader\` and `host64\` with versions, what `Check.cmd` prints, Windows/GPU/driver and recent crash
+   records. Your Windows user name is replaced with `<user>`.
+2. [Open an issue](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/new/choose) and attach the zip.
+
+Comments on videos and forum posts are hard to troubleshoot in: please use an issue so the logs stay together.
+
 ## Status
 
 Unofficial community mod, not affiliated with Square Enix, NVIDIA or any server. Square Enix's terms for
 its official servers prohibit third-party tools that modify the game client; check your server's rules
-before using this. Personal-rig tested; other GPUs, drivers and loaders are unverified. Report the loader,
-GPU, driver and failing step.
+before using this. Personal-rig tested; other GPUs, drivers and loaders are unverified. Problems: see
+[Reporting a problem](#reporting-a-problem).
