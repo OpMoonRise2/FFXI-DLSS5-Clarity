@@ -5,6 +5,10 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('ffxi-clarity-test-' + [guid]::New
 function Assert($c, $m) { if (!$c) { throw "FAIL: $m" }; "PASS: $m" }
 function Hash($p) { (Get-FileHash -LiteralPath $p).Hash }
 function Get-Process { param($Name, $ErrorAction) @() }   # fixtures only: ignore any running game
+# Fixtures only: a fake graphics card (WMI, then the registry fallback), so results do not depend on this PC's GPU
+$script:FakeGpus = @('NVIDIA GeForce RTX 4060'); $script:FakeRegistryGpus = @()
+function Get-CimInstance { param($ClassName, $ErrorAction) if ($script:FakeGpus -contains 'THROW') { throw 'WMI unavailable' }; $script:FakeGpus | ForEach-Object { [pscustomobject]@{ Name = $_ } } }
+function Get-ItemProperty { param($Path, $ErrorAction) $script:FakeRegistryGpus | ForEach-Object { [pscustomobject]@{ DriverDesc = $_ } } }
 function Fixture($n, [switch]$NoNvidia) {
     $p = Join-Path $root $n; New-Item -ItemType Directory (Join-Path $p 'host64') -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'fixture.exe'), 'not a real exe')
@@ -200,6 +204,34 @@ $nbMsg = (& (Join-Path $Package 'CollectLogs.ps1') -Target $nb -OutDir $nbOut) -
 Remove-Item Env:\CLARITY_NO_EXPLORER
 $nbUnz = Join-Path $root 'collect unzipped nb'; [IO.Compression.ZipFile]::ExtractToDirectory((Get-ChildItem $nbOut -Filter '*.zip')[0].FullName, $nbUnz)
 Assert ($nbMsg -match 'does not look like a bootloader' -and (Get-Content -Raw "$nbUnz\installed-files.txt") -notmatch 'private-notes' -and !(Test-Path "$nbUnz\folders.txt")) 'collect: non-bootloader folder not listed, user warned'
+
+# 11. GPU check: any RTX adapter passes; a confirmed non-RTX card is refused with no writes; when Windows lists no
+#     adapter it warns instead of blocking; -SkipGpuCheck overrides; Restore is never gated.
+$gp = Fixture 'gpu check'
+foreach ($g in 'NVIDIA GeForce GTX 1660 SUPER','NVIDIA GeForce MX450','AMD Radeon RX 7900 XTX','Intel(R) Arc(TM) A770 Graphics') {
+    $script:FakeGpus = @($g)
+    Assert (((& $setup -Action Check -Target $gp) -join "`n") -match ('NEEDED: This needs an NVIDIA RTX graphics card.*Found: ' + [regex]::Escape($g))) "non-RTX ($g): Check refuses and names the card"
+}
+$script:FakeGpus = @('NVIDIA GeForce GTX 1080 Ti')
+$refused = $false; try { & $setup -Action Install -Target $gp | Out-Null } catch { $refused = $true }
+Assert ($refused -and !(Test-Path "$gp\host64\winmm.dll") -and !(Get-ChildItem $gp -Directory -Filter 'FFXI-Clarity-backup-*')) 'non-RTX: install refused, no writes'
+& $setup -Action Install -Target $gp -SkipGpuCheck | Out-Null
+Assert (Test-Path "$gp\host64\winmm.dll") 'non-RTX + -SkipGpuCheck: installed'
+& $setup -Action Restore -Target $gp -Backup (Get-ChildItem $gp -Directory -Filter 'FFXI-Clarity-backup-*').FullName | Out-Null
+Assert (!(Test-Path "$gp\host64\winmm.dll")) 'non-RTX: Restore still works'
+$script:FakeGpus = @('Microsoft Basic Display Adapter')
+Assert (((& $setup -Action Check -Target $gp) -join "`n") -match 'NEEDED: This needs an NVIDIA RTX.*install the NVIDIA driver') 'no driver (Basic Display Adapter): refused with the driver hint'
+foreach ($set in @(@('Intel(R) UHD Graphics','NVIDIA GeForce RTX 3050 Laptop GPU'), @('NVIDIA RTX A4000'), @('Quadro RTX 5000'), @('NVIDIA TITAN RTX'), @('NVIDIA GeForce RTX 5090','Microsoft Remote Display Adapter'))) {
+    $script:FakeGpus = $set; $chk = (& $setup -Action Check -Target $gp) -join "`n"
+    Assert ($chk -match 'File prerequisites passed' -and $chk -notmatch 'RTX graphics card|WARNING') "RTX ($($set -join ' + ')): passes"
+}
+$script:FakeGpus = @('THROW'); $script:FakeRegistryGpus = @('NVIDIA GeForce RTX 4070')
+$chk = (& $setup -Action Check -Target $gp) -join "`n"
+Assert ($chk -match 'File prerequisites passed' -and $chk -notmatch 'WARNING') 'WMI fails: registry fallback finds the RTX card'
+$script:FakeRegistryGpus = @()
+$chk = (& $setup -Action Check -Target $gp) -join "`n"
+Assert ($chk -match 'WARNING: Windows did not report a graphics card' -and $chk -match 'File prerequisites passed') 'no adapter reported at all: warns, does not block'
+$script:FakeGpus = @('NVIDIA GeForce RTX 4060')
 
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'

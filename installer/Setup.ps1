@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('Check','Install','Restore')][string]$Action='Check', [string]$Target, [string]$Backup, [ValidateRange(0,8192)][int]$DepthFilter=4096)
+param([ValidateSet('Check','Install','Restore')][string]$Action='Check', [string]$Target, [string]$Backup, [ValidateRange(0,8192)][int]$DepthFilter=4096, [switch]$SkipGpuCheck)
 $ErrorActionPreference='Stop'
 if ([string]::IsNullOrWhiteSpace($Target)) { $Target = [IO.Directory]::GetParent($PSScriptRoot).FullName }
 function Hash([string]$p) { $s=[IO.File]::OpenRead($p); $h=[Security.Cryptography.SHA256]::Create(); try { ([BitConverter]::ToString($h.ComputeHash($s))).Replace('-','') } finally { $s.Dispose(); $h.Dispose() } }
@@ -41,6 +41,23 @@ if($Action -eq 'Restore'){
 }
 if(!@(Get-ChildItem -LiteralPath $root -File -Filter '*.exe').Count){throw 'Choose the folder containing the FFXI loader/game executable, not the launcher download directory.'}
 $problems=[Collections.Generic.List[string]]::new()
+# DLSS needs an NVIDIA RTX card (tensor cores): GTX, MX, AMD and Intel cards cannot run it, and users without one
+# crashed or got nothing after installing. Any RTX adapter counts (laptops also list their Intel/AMD graphics).
+# Refused only on a confirmed miss: when Windows cannot list the adapters (WMI broken, cmdlet missing), the
+# registry is tried, then it is a warning. -SkipGpuCheck overrides a wrong detection. Restore is never gated.
+$gpuNote=$null
+if(!$SkipGpuCheck){
+    $gpus=@()
+    try{$gpus=@(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop | ForEach-Object {$_.Name} | Where-Object {$_})}catch{}
+    if(!$gpus.Count){try{$gpus=@(Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*' -ErrorAction SilentlyContinue | ForEach-Object {$_.DriverDesc} | Where-Object {$_})}catch{}}
+    if(!$gpus.Count){$gpuNote='Windows did not report a graphics card, so it was not checked. This only works on an NVIDIA RTX card (GTX, AMD and Intel cards cannot run DLSS).'}
+    elseif(!@($gpus | Where-Object {$_ -match '\bRTX\b'}).Count){
+        $msg="This needs an NVIDIA RTX graphics card. DLSS runs on RTX cards only; GTX, AMD and Intel cards cannot run it. Found: $(($gpus | Select-Object -Unique) -join ', ')."
+        if(@($gpus | Where-Object {$_ -match 'Basic (Display|Render)'}).Count){$msg+=' "Microsoft Basic Display Adapter" means no graphics driver is installed: if you have an RTX card, install the NVIDIA driver, then run Check.cmd again.'}
+        else{$msg+=' This PC cannot use FFXI-DLSS5-Clarity. (If the card above is wrong, see README.md, Troubleshooting.)'}
+        $problems.Add($msg)
+    }
+}
 # An existing reshade-shaders\ that already carries the feeder effect is the active preset's effect root
 # (a played-on setup keeps LumeniteFX and the feeder effect there). It stays the root. Only the feeder
 # effect has to match the shipped dlss5-feed.addon32 (same Feeder release), so one from another release is
@@ -92,6 +109,7 @@ if($dg -and $dg -notmatch '(?im)^\s*OutputAPI\s*=\s*d3d11_fl11_0\s*$'){
 $conflicts=@(Get-ChildItem -LiteralPath (Join-Path $root 'host64') -File -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^(renodx-dlss.*|deep-fried-chicken.*)\.addon64$'})
 foreach($c in $conflicts){$problems.Add("host64\$($c.Name) is another neural consumer (RenoDX / Deep Fried Chicken) and would fight OptiScaler for the neural pass. Move it out of host64 (put it back to switch back), then run Check.cmd again.")}
 Write-Output "FFXI Clarity portable preflight: $root"
+if($gpuNote){Write-Output "WARNING: $gpuNote"}
 if($problems.Count){$problems | ForEach-Object {Write-Output "NEEDED: $_"};Write-Output 'Nothing was changed. Fix the NEEDED lines above and run Check.cmd again.';if($Action -eq 'Install'){throw 'No installation files changed.'};return}
 $replacedWrappers | ForEach-Object {Write-Output $_}
 if($dgFixed){Write-Output 'dgVoodoo.conf is not set to Direct3D 11 feature level 11: Install sets OutputAPI = d3d11_fl11_0 (backed up). Phoenix launcher rewrites this file every launch: set its graphics output to D3D11 there too.'}
