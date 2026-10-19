@@ -168,5 +168,38 @@ $refused = $false; try { & $setup -Action Install -Target $y | Out-Null } catch 
 Assert ($refused -and !(Test-Path "$y\host64\winmm.dll")) 'other neural consumer in host64: refused, no writes'
 Assert (((& $setup -Action Check -Target $y) -join "`n") -match 'host64\\deep-fried-chicken.addon64 is another neural consumer.*Move it out of host64') 'other neural consumer: Check names the file to move'
 
+# 10. CollectLogs: one zip with logs, file list and Check output; user name scrubbed, binary config intact, install untouched
+$cl = Fixture 'collect logs'; Copy-Item "$xb\dgVoodoo.conf" "$cl\dgVoodoo.conf"; Copy-Item "$y\host64\deep-fried-chicken.addon64" "$cl\host64\"
+[IO.File]::WriteAllText("$cl\dlss5-feed.log", "host game: C:\Users\$env:USERNAME\Ashita\bootloader\xiloader.exe`r`n")
+[IO.File]::WriteAllText("$cl\host64\OptiScaler.log", "DLSS v310.9.1 loaded`r`n")
+$before = (Get-ChildItem $cl -Recurse -File | ForEach-Object { "$($_.FullName)|$(Hash $_.FullName)" }) -join "`n"
+$clOut = Join-Path $root 'collect out'; $env:CLARITY_NO_EXPLORER = '1'
+# The running game holds its logs open for writing; the collector must still read them
+$held = [IO.File]::Open("$cl\host64\OptiScaler.log", 'Open', 'Write', 'Read')
+try { & (Join-Path $Package 'CollectLogs.ps1') -Target $cl -OutDir $clOut | Out-Null } finally { $held.Dispose() }
+Remove-Item Env:\CLARITY_NO_EXPLORER
+$after = (Get-ChildItem $cl -Recurse -File | ForEach-Object { "$($_.FullName)|$(Hash $_.FullName)" }) -join "`n"
+Assert ($before -eq $after) 'collect: install folder unchanged'
+$zipPath = @(Get-ChildItem $clOut -Filter 'FFXI-Clarity-support-*.zip')
+Assert ($zipPath.Count -eq 1) 'collect: one support zip written'
+$unz = Join-Path $root 'collect unzipped'; Add-Type -AssemblyName System.IO.Compression.FileSystem
+$za = [IO.Compression.ZipFile]::OpenRead($zipPath[0].FullName); $names = @($za.Entries | ForEach-Object FullName); $za.Dispose()
+Assert (!($names -match '\\')) 'collect: zip paths use forward slashes'
+[IO.Compression.ZipFile]::ExtractToDirectory($zipPath[0].FullName, $unz)
+Assert ((Test-Path "$unz\files\host64\OptiScaler.log") -and (Test-Path "$unz\check.txt") -and (Test-Path "$unz\system.txt") -and (Test-Path "$unz\crashes.txt")) 'collect: logs (one held open for writing), Check output, system and crash records included'
+$feed = Get-Content -Raw "$unz\files\dlss5-feed.log"
+Assert ($feed -match 'C:\\Users\\<user>\\Ashita' -and $feed -notmatch [regex]::Escape("\$env:USERNAME\")) 'collect: Windows user name scrubbed from logs'
+Assert ((Hash "$unz\files\dgVoodoo.conf") -eq (Hash "$cl\dgVoodoo.conf")) 'collect: binary dgVoodoo.conf copied byte for byte'
+Assert ((Get-Content -Raw "$unz\installed-files.txt") -match 'host64\\deep-fried-chicken.addon64') 'collect: file list shows another mod in host64'
+Assert ((Get-Content -Raw "$unz\check.txt") -match 'deep-fried-chicken') 'collect: Check output names the conflict'
+Assert (!(Select-String -Path "$unz\*.txt","$unz\files\*.log" -Pattern ([regex]::Escape($env:COMPUTERNAME)) -Quiet)) 'collect: PC name scrubbed'
+# A package extracted outside a bootloader (Downloads, Desktop) must not list that folder
+$nb = Join-Path $root 'not a bootloader'; New-Item -ItemType Directory $nb | Out-Null; [IO.File]::WriteAllText("$nb\private-notes.txt", 'x')
+$nbOut = Join-Path $root 'collect out nb'; $env:CLARITY_NO_EXPLORER = '1'
+$nbMsg = (& (Join-Path $Package 'CollectLogs.ps1') -Target $nb -OutDir $nbOut) -join "`n"
+Remove-Item Env:\CLARITY_NO_EXPLORER
+$nbUnz = Join-Path $root 'collect unzipped nb'; [IO.Compression.ZipFile]::ExtractToDirectory((Get-ChildItem $nbOut -Filter '*.zip')[0].FullName, $nbUnz)
+Assert ($nbMsg -match 'does not look like a bootloader' -and (Get-Content -Raw "$nbUnz\installed-files.txt") -notmatch 'private-notes' -and !(Test-Path "$nbUnz\folders.txt")) 'collect: non-bootloader folder not listed, user warned'
+
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'
