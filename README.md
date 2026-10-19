@@ -3,6 +3,13 @@
 DLSS DLAA + DLSS 5 neural rendering for **Final Fantasy XI**, packaged for the loaders people
 actually use (Ashita, HorizonXI, Phoenix, retail-style bootloaders), without blurring when the camera moves.
 
+> **Use at your own risk.** Free, unofficial community mod, provided **as is, with no warranty**. The author is
+> **not liable** for any damage or loss from using it (see [DISCLAIMER.md](DISCLAIMER.md) and [LICENSE](LICENSE)).
+> The installer backs up every file it changes and `Restore.cmd` undoes it, but keep your own backups. You are
+> responsible for your own system, drivers, settings and other mods, and for the NVIDIA DLLs you download from
+> third parties. Client mods may break a server's rules: check yours first, because any account action is your
+> responsibility. Not affiliated with Square Enix, NVIDIA or any server. By installing, you accept these terms.
+
 FFXI is a 2002 32-bit Direct3D 8 game with no DLSS of its own. This package wires together
 existing community work (credited in [CREDITS.md](CREDITS.md)) and adds a patched OptiScaler build
 that fixes the problems we hit on FFXI:
