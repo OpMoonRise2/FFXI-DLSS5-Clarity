@@ -190,6 +190,14 @@ Assert ($feed -match 'C:\\Users\\<user>\\Ashita' -and $feed -notmatch [regex]::E
 Assert ((Hash "$unz\files\dgVoodoo.conf") -eq (Hash "$cl\dgVoodoo.conf")) 'collect: binary dgVoodoo.conf copied byte for byte'
 Assert ((Get-Content -Raw "$unz\installed-files.txt") -match 'host64\\deep-fried-chicken.addon64') 'collect: file list shows another mod in host64'
 Assert ((Get-Content -Raw "$unz\check.txt") -match 'deep-fried-chicken') 'collect: Check output names the conflict'
+Assert (!(Select-String -Path "$unz\*.txt","$unz\files\*.log" -Pattern ([regex]::Escape($env:COMPUTERNAME)) -Quiet)) 'collect: PC name scrubbed'
+# A package extracted outside a bootloader (Downloads, Desktop) must not list that folder
+$nb = Join-Path $root 'not a bootloader'; New-Item -ItemType Directory $nb | Out-Null; [IO.File]::WriteAllText("$nb\private-notes.txt", 'x')
+$nbOut = Join-Path $root 'collect out nb'; $env:CLARITY_NO_EXPLORER = '1'
+$nbMsg = (& (Join-Path $Package 'CollectLogs.ps1') -Target $nb -OutDir $nbOut) -join "`n"
+Remove-Item Env:\CLARITY_NO_EXPLORER
+$nbUnz = Join-Path $root 'collect unzipped nb'; [IO.Compression.ZipFile]::ExtractToDirectory((Get-ChildItem $nbOut -Filter '*.zip')[0].FullName, $nbUnz)
+Assert ($nbMsg -match 'does not look like a bootloader' -and (Get-Content -Raw "$nbUnz\installed-files.txt") -notmatch 'private-notes' -and !(Test-Path "$nbUnz\folders.txt")) 'collect: non-bootloader folder not listed, user warned'
 
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'

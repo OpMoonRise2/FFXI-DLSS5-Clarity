@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for reporting. Logs are what make a problem fixable, so please start with step 1.
 
-        **1.** Run `CollectLogs.cmd` from your `bootloader\FFXI-DLSS5-Clarity-<version>\` folder (right after the problem, before launching again). It saves `FFXI-Clarity-support-<date>.zip` on your desktop and changes nothing. Your Windows user name is removed from it.
+        **1.** Run `CollectLogs.cmd` from your `bootloader\FFXI-DLSS5-Clarity-<version>\` folder (right after the problem, before launching again). It saves `FFXI-Clarity-support-<date>.zip` on your desktop and changes nothing. Your Windows user name and PC name are removed from it.
         **2.** Drag that zip into the "Support zip" box below.
 
         No `CollectLogs.cmd` (1.2.2 or older)? Attach these instead: `bootloader\dlss5-feed.log`, `bootloader\ReShade.log`, `bootloader\host64\OptiScaler.log`, `bootloader\host64\dlss5-feed-host.log`, `bootloader\host64\ReShade.log`, and paste what `Check.cmd` prints.

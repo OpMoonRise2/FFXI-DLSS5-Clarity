@@ -2,7 +2,7 @@
 param([string]$Target, [string]$OutDir)
 # Gathers everything a problem report needs into one zip: logs, configs, the wrapper files present (with hashes
 # and versions), Check output, GPU/driver and recent crash records. Reads only; never changes the install.
-# The Windows user name is replaced with <user> in every text file so paths do not identify the reporter.
+# The Windows user name (<user>) and PC name (<pc>) are replaced in every text file so the zip does not identify the reporter.
 $ErrorActionPreference='Stop'
 if ([string]::IsNullOrWhiteSpace($Target)) { $Target = [IO.Directory]::GetParent($PSScriptRoot).FullName }
 if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = [Environment]::GetFolderPath('Desktop') }
@@ -10,7 +10,13 @@ $root=(Resolve-Path -LiteralPath $Target).Path
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $work=Join-Path ([IO.Path]::GetTempPath()) "FFXI-Clarity-support-$stamp"
 [void][IO.Directory]::CreateDirectory($work)
-function Scrub([string]$s) { if($env:USERNAME){$s=[regex]::Replace($s,'(?<=[\\/])'+[regex]::Escape($env:USERNAME)+'(?=[\\/])','<user>','IgnoreCase')}; $s }
+# The profile folder can differ from the user name (renamed account), so both are scrubbed inside paths
+$userNames=@($env:USERNAME,$(if($env:USERPROFILE){Split-Path $env:USERPROFILE -Leaf})) | Where-Object {$_} | Select-Object -Unique
+function Scrub([string]$s) {
+    foreach($n in $userNames){$s=[regex]::Replace($s,'(?<=[\\/])'+[regex]::Escape($n)+'(?=[\\/])','<user>','IgnoreCase')}
+    if($env:COMPUTERNAME){$s=[regex]::Replace($s,'\b'+[regex]::Escape($env:COMPUTERNAME)+'\b','<pc>','IgnoreCase')}
+    $s
+}
 function Save($name,$text) { [IO.File]::WriteAllText((Join-Path $work $name),(Scrub ($text | Out-String)),[Text.UTF8Encoding]::new($false)) }
 # Not Get-FileHash: it is missing from some Windows PowerShell sessions (same helper as Setup.ps1)
 function Hash($p) { try{$s=[IO.File]::OpenRead($p);$h=[Security.Cryptography.SHA256]::Create();try{([BitConverter]::ToString($h.ComputeHash($s))).Replace('-','')}finally{$s.Dispose();$h.Dispose()}}catch{'unreadable'} }
@@ -29,16 +35,22 @@ foreach($rel in $files){
 
 # What is installed: every file in bootloader\ and host64\ with size, date, version and hash. Another mod's
 # wrapper or neural consumer shows up here even when no log mentions it.
-$listing=foreach($dir in @($root,(Join-Path $root 'host64'))){
-    if(!(Test-Path -LiteralPath $dir)){continue}
-    Get-ChildItem -LiteralPath $dir -File -Force | Sort-Object Name | ForEach-Object {
-        $v=$_.VersionInfo
-        [pscustomobject]@{Path=$_.FullName.Substring($root.Length).TrimStart('\');Size=$_.Length;Modified=$_.LastWriteTime.ToString('yyyy-MM-dd HH:mm');
-            Product=$v.ProductName;Version=$v.FileVersion;SHA256=$(if($_.Extension -match '^\.(dll|exe|addon32|addon64|asi)$'){Hash $_.FullName}else{''})}
+# Listed only when the target looks like a bootloader: a package extracted into Downloads or the Desktop must
+# not put that whole folder's contents into a zip that gets posted publicly.
+$isBootloader=@('host64','pol.exe','xiloader.exe','d3d8.dll','dlss5-feed.log' | Where-Object {Test-Path -LiteralPath (Join-Path $root $_)}).Count -gt 0
+$notBootloader="$(Scrub $root) does not look like a bootloader folder (no host64\, pol.exe, xiloader.exe, d3d8.dll or dlss5-feed.log), so its files were not listed. Move the package folder into your bootloader folder."
+if($isBootloader){
+    $listing=foreach($dir in @($root,(Join-Path $root 'host64'))){
+        if(!(Test-Path -LiteralPath $dir)){continue}
+        Get-ChildItem -LiteralPath $dir -File -Force | Sort-Object Name | ForEach-Object {
+            $v=$_.VersionInfo
+            [pscustomobject]@{Path=$_.FullName.Substring($root.Length).TrimStart('\');Size=$_.Length;Modified=$_.LastWriteTime.ToString('yyyy-MM-dd HH:mm');
+                Product=$v.ProductName;Version=$v.FileVersion;SHA256=$(if($_.Extension -match '^\.(dll|exe|addon32|addon64|asi)$'){Hash $_.FullName}else{''})}
+        }
     }
-}
-Save 'installed-files.txt' ($listing | Format-Table -AutoSize -Wrap | Out-String -Width 400)
-Save 'folders.txt' ((Get-ChildItem -LiteralPath $root -Directory -Force | ForEach-Object Name) -join "`r`n")
+    Save 'installed-files.txt' ($listing | Format-Table -AutoSize -Wrap | Out-String -Width 400)
+    Save 'folders.txt' ((Get-ChildItem -LiteralPath $root -Directory -Force | ForEach-Object Name) -join "`r`n")
+}else{Save 'installed-files.txt' $notBootloader}
 
 # Check output (the same text Check.cmd prints), including a refusal or a damaged package
 $setup=Join-Path $PSScriptRoot 'Setup.ps1'
@@ -60,6 +72,7 @@ try{$bg=Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\WOW6432Node\PlayOnlineUS\S
 $running=@(Get-Process pol,xiloader,phoenix-loader,ashita-cli,windower,dlss5-feed-host64 -ErrorAction SilentlyContinue | ForEach-Object Name)
 [void]$sys.AppendLine("Running now: $(if($running.Count){$running -join ', '}else{'none'})")
 if($missing.Count){[void]$sys.AppendLine("Not found: $($missing -join ', ')")}
+if(!$isBootloader){[void]$sys.AppendLine("WARNING: $notBootloader")}
 Save 'system.txt' $sys.ToString()
 
 # Crashes: Windows Error Reporting / Application Error records for the game and helper, last 14 days.
@@ -79,7 +92,8 @@ Add-Type -AssemblyName System.IO.Compression,System.IO.Compression.FileSystem
 $archive=[IO.Compression.ZipFile]::Open($zip,[IO.Compression.ZipArchiveMode]::Create)
 try{Get-ChildItem -LiteralPath $work -Recurse -File | ForEach-Object {[void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$_.FullName,$_.FullName.Substring($work.Length+1).Replace('\','/'),[IO.Compression.CompressionLevel]::Optimal)}}finally{$archive.Dispose()}
 Remove-Item -LiteralPath $work -Recurse -Force
+if(!$isBootloader){Write-Output "WARNING: $notBootloader"}
 Write-Output "Saved $zip"
 Write-Output 'Attach this zip to a GitHub issue: https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/new/choose'
-Write-Output 'Your Windows user name was replaced with <user>. Open the zip first if you want to check what it contains.'
+Write-Output 'Your Windows user name was replaced with <user> and the PC name with <pc>. Open the zip first if you want to check what it contains.'
 if(!$env:CLARITY_NO_EXPLORER){try{Start-Process explorer.exe "/select,`"$zip`""}catch{}}

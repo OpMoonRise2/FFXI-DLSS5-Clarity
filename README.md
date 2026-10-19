@@ -148,7 +148,7 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 - **1.2.3** (support tools only; same binaries, settings and installer behaviour as 1.2.2):
   `CollectLogs.cmd` saves one zip with every log, config, the installed-file list with versions, `Check.cmd`'s
-  output, GPU/driver and recent crash records (Windows user name removed), so a problem report needs one
+  output, GPU/driver and recent crash records (Windows user and PC names removed), so a problem report needs one
   attachment. GitHub issue form, and a crash-on-launch entry in Troubleshooting.
 - **1.2.2** (installer only; same binaries and settings as 1.2.1): no more dead end for setups coming from
   another mod or launcher. 1.2.1 refused any other dgVoodoo or ReShade build with `Existing d3d8.dll differs from
@@ -259,7 +259,7 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
    launching again (the logs are rewritten on each start). It changes nothing and saves
    `FFXI-Clarity-support-<date>.zip` on your desktop: the logs and configs above, the list of files in
    `bootloader\` and `host64\` with versions, what `Check.cmd` prints, Windows/GPU/driver and recent crash
-   records. Your Windows user name is replaced with `<user>`.
+   records. Your Windows user name and PC name are replaced with `<user>` and `<pc>`.
 2. [Open an issue](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/new/choose) and attach the zip.
 
 Comments on videos and forum posts are hard to troubleshoot in: please use an issue so the logs stay together.
