@@ -77,6 +77,8 @@ try{$nv=& nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,n
 try{$bg=Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\WOW6432Node\PlayOnlineUS\SquareEnix\FinalFantasyXI' -ErrorAction Stop;[void]$sys.AppendLine("FFXI registry: window $($bg.'0001')x$($bg.'0002'), background $($bg.'0003')x$($bg.'0004')")}catch{[void]$sys.AppendLine('FFXI registry: PlayOnlineUS key not found (other region or private-server client)')}
 # Two nvngx_dlssnr.dll builds both say 310.8.0: NVIDIA's original (signature Valid) runs the neural pass on RTX 50
 # only; the modified one for RTX 20/30/40 (signature HashMismatch) is the tested kind. See README.md, Requirements.
+# The module is loaded from this PowerShell's own folder: inherited PowerShell 7 module paths break autoloading.
+try{Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop}catch{}
 foreach($rel in 'host64\nvngx_dlssnr.dll','host64\nvngx_dlss.dll'){
     $p=Join-Path $root $rel
     if(Test-Path -LiteralPath $p){$sig=try{[string](Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop).Status}catch{'not checked'};[void]$sys.AppendLine("$rel`: $((Get-Item -LiteralPath $p).VersionInfo.FileVersion) | SHA256 $(Hash $p) | signature $sig")}

@@ -90,6 +90,10 @@ foreach($name in @('nvngx_dlss.dll','nvngx_dlssnr.dll')){
 # common cases do not depend on the signature cmdlet being available.
 $testedDlssNr='8270B350CD82DE5CE89806872CDD6B6A9249B80836B91BBEB3573470744CC206'
 $originalDlssNr=@('E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E')
+# Started from PowerShell 7 (or a tool that inherits its environment), Windows PowerShell gets PowerShell 7's module
+# paths and cannot autoload Get-AuthenticodeSignature; 1.2.5 then silently treated NVIDIA's original as unknown.
+# Loading the module from this PowerShell's own folder works either way.
+try{Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop}catch{}
 function DlssNrBuild([string]$p){
     $h=Hash $p
     if($h -eq $testedDlssNr){return 'tested'};if($h -in $originalDlssNr){return 'original'}
