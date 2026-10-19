@@ -19,7 +19,7 @@
 #>
 param(
     [Parameter(Mandatory)][string]$StackDir,
-    [string]$Version = '1.2.4',
+    [string]$Version = '1.2.5',
     [string]$ForkCommit = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -35,7 +35,7 @@ function Put($from, $rel) {
 }
 
 # Installer, docs, licences, presets
-foreach ($f in 'Setup.ps1','Install.cmd','Check.cmd','Restore.cmd','CollectLogs.ps1','CollectLogs.cmd') { Put (Join-Path $repo "installer\$f") $f }
+foreach ($f in 'Setup.ps1','Install.cmd','Check.cmd','Restore.cmd','Test.cmd','CollectLogs.ps1','CollectLogs.cmd') { Put (Join-Path $repo "installer\$f") $f }
 foreach ($f in 'README.md','CREDITS.md','LIGHTING-EXTRAS.md','LICENSE') { Put (Join-Path $repo $f) $f }
 Get-ChildItem (Join-Path $repo 'licenses') -File | ForEach-Object { Put $_.FullName "licenses\$($_.Name)" }
 Put (Join-Path $repo 'presets\FFXI-Clarity.ini') 'payload\FFXI-Clarity.ini'

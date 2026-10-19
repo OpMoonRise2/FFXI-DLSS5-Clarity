@@ -75,6 +75,12 @@ try{[void]$sys.AppendLine("RAM: $([math]::Round((Get-CimInstance Win32_ComputerS
 try{foreach($g in Get-CimInstance Win32_VideoController){[void]$sys.AppendLine("GPU: $($g.Name) | driver $($g.DriverVersion) ($($g.DriverDate)) | $($g.CurrentHorizontalResolution)x$($g.CurrentVerticalResolution) @ $($g.CurrentRefreshRate) Hz")}}catch{}
 try{$nv=& nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>$null;if($nv){[void]$sys.AppendLine("nvidia-smi: $nv")}}catch{}
 try{$bg=Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\WOW6432Node\PlayOnlineUS\SquareEnix\FinalFantasyXI' -ErrorAction Stop;[void]$sys.AppendLine("FFXI registry: window $($bg.'0001')x$($bg.'0002'), background $($bg.'0003')x$($bg.'0004')")}catch{[void]$sys.AppendLine('FFXI registry: PlayOnlineUS key not found (other region or private-server client)')}
+# Two nvngx_dlssnr.dll builds both say 310.8.0: NVIDIA's original (signature Valid) runs the neural pass on RTX 50
+# only; the modified one for RTX 20/30/40 (signature HashMismatch) is the tested kind. See README.md, Requirements.
+foreach($rel in 'host64\nvngx_dlssnr.dll','host64\nvngx_dlss.dll'){
+    $p=Join-Path $root $rel
+    if(Test-Path -LiteralPath $p){$sig=try{[string](Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop).Status}catch{'not checked'};[void]$sys.AppendLine("$rel`: $((Get-Item -LiteralPath $p).VersionInfo.FileVersion) | SHA256 $(Hash $p) | signature $sig")}
+}
 $running=@(Get-Process pol,xiloader,phoenix-loader,ashita-cli,windower,dlss5-feed-host64 -ErrorAction SilentlyContinue | ForEach-Object Name)
 [void]$sys.AppendLine("Running now: $(if($running.Count){$running -join ', '}else{'none'})")
 if($missing.Count){[void]$sys.AppendLine("Not found: $($missing -join ', ')")}

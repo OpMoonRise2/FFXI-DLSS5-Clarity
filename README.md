@@ -36,22 +36,31 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Requirements
 
 - **An NVIDIA RTX GPU** (GeForce RTX 20 series or newer, or an RTX workstation card). GTX, MX, AMD and Intel
-  cards cannot run DLSS: `Check.cmd` refuses them. NVIDIA officially enables DLSS 5 neural rendering on RTX 50 cards only. This package
-  was tested on an **RTX 4060 8GB** with drivers **616.92 and 616.56** (the current stack was played on
-  616.56). On RTX 20/30/40, whether the neural pass runs depends on the `nvngx_dlssnr.dll` you supply
-  (see the DLSS5-Feeder README); if it does not run, you still get DLAA.
+  cards cannot run DLSS: `Check.cmd` refuses them. This package was tested on an **RTX 4060 8GB** with
+  drivers **616.92 and 616.56** (the current stack was played on 616.56).
 - Two NVIDIA files you supply yourself (licensing does not allow including them):
-  `nvngx_dlss.dll` (DLSS, tested 310.9.1) and `nvngx_dlssnr.dll` (neural model, tested 310.8.0).
-  See the [DLSS5-Feeder README](https://github.com/jlrouzies-fr/DLSS5-Feeder) for where to get them.
+  - `nvngx_dlss.dll` (DLSS, tested 310.9.1; from any DLSS game or DLSS Swapper).
+  - `nvngx_dlssnr.dll` (the neural model). **Which build matters, and the version number does not tell them
+    apart:** both say 310.8.0.
+    - **RTX 20/30/40:** you need the **modified build** from the [RenoDX Discord](https://discord.com/invite/renodx)
+      (see the [DLSS5-Feeder README](https://github.com/jlrouzies-fr/DLSS5-Feeder)). The tested copy has SHA-256
+      `8270B350CD82DE5CE89806872CDD6B6A9249B80836B91BBEB3573470744CC206`.
+    - **RTX 50:** NVIDIA's original signed build works, and so does the modified one.
+
+    NVIDIA's original build creates the neural feature on RTX 50 cards only. On an RTX 20/30/40 card it fails
+    without any visible error and you get DLAA alone. `Check.cmd` refuses that combination and says what to do;
+    see [Troubleshooting](#troubleshooting).
 - Your FFXI client's **3D background resolution set to 4096x4096** (or pass `-DepthFilter <size>` to match yours).
 
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.4\`.
-2. Put the two NVIDIA DLLs in its `Dependencies\` folder (skip if your `bootloader\host64\` already has them).
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.5\`.
+2. Put the two NVIDIA DLLs in its `Dependencies\` folder. You can skip this if your `bootloader\host64\` already
+   has them; a file you put in `Dependencies\` replaces a different one in `host64\` (backed up).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
-4. Run `bootloader\host64\dlss5-feed-host64.exe --test` once; expect `300/300 evaluates succeeded`.
+4. Run `Test.cmd` once; expect `300/300 evaluates succeeded`. (Double-clicking `host64\dlss5-feed-host64.exe`
+   only shows "nothing to run here": the helper is started by the game.)
 5. Launch FFXI. A second window, "DLSS 5 Feed host", opens beside the game. See [Shortcuts](#shortcuts) for
    how to open each settings menu.
 
@@ -71,7 +80,9 @@ Where you press a key matters: the game window and the "DLSS 5 Feed host" helper
 | **Ctrl+Shift+F3** | the game (works anywhere) | Neural pass off, DLAA stays on (for comparisons) |
 | **Ctrl+Shift+F4 / F5 / F6** | the game (works anywhere) | Neural pass on with style Default / Natural / Cinematic |
 
-The Ctrl+Shift keys are not saved: the next start uses `host64\OptiScaler.ini` again. The helper's title bar
+The Ctrl+Shift keys are not saved: the next start uses `host64\OptiScaler.ini` again. To start with 2 neural
+passes every time, set them in OptiScaler's DLSS-NR section and press **Save INI**, or, with the game closed, set
+`Passes = 2` under `[DlssNr]` in `host64\OptiScaler.ini` (the shipped `auto` means 1). The helper's title bar
 names the menu key in use (for example "press F6/Insert HERE for OptiScaler's menu | in game: Ctrl+F9 shows this window").
 
 Options: `Setup.ps1 -Action Install -Target "D:\Games\Ashita\bootloader" -DepthFilter 2048`.
@@ -92,7 +103,7 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
 - **Added, or replaced when different:** `dlss5-feed.addon32`, `ReshadeEffectShaderToggler.addon32` and
   `.ini`, `FFXI-Clarity.ini`, `presets\`, `ffxi-clarity-shaders\`, `host64\dlss5-feed-host64.exe`,
   `host64\winmm.dll` (the patched OptiScaler), `host64\nvngx.dll_dlssnr.dll`, the two NVIDIA DLLs from
-  `Dependencies\` when `host64\` has none, and `reshade-shaders\Shaders\DLSS5_Feed.fx` when an existing one is
+  `Dependencies\` when `host64\` has none or a different copy (that one is backed up), and `reshade-shaders\Shaders\DLSS5_Feed.fx` when an existing one is
   from another Feeder release (the effect must match the shipped add-on). An existing `reshade-shaders\` that
   already holds the feeder effect stays your effect root; nothing else is required inside it.
 - **Settings it writes:**
@@ -147,6 +158,17 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.2.5** (installer and support tools; same binaries and settings as 1.2.4): stops the "DLAA only on RTX
+  20/30/40" trap. Both `nvngx_dlssnr.dll` builds say 310.8.0, but NVIDIA's original runs the neural pass on RTX 50
+  only.
+  - `Check.cmd` and `Install.cmd` tell the builds apart (by hash, else by NVIDIA's signature) and refuse the
+    original build on a confirmed RTX 20/30/40, naming the card and the fix (`-AllowDlaaOnly` overrides).
+  - A DLL you put in `Dependencies\` now replaces a different copy in `host64\` (backed up). Before, `host64\`
+    always won and a corrected file was silently ignored.
+  - New `Test.cmd` runs the helper's self-test, which double-clicking the helper cannot do.
+  - `CollectLogs.cmd` records both NVIDIA DLLs' version, hash and signature status.
+  - README: which `nvngx_dlssnr.dll` to get, how to save 2 neural passes, and a Troubleshooting entry for
+    `FAIL_FeatureNotSupported`.
 - **1.2.4** (installer only; same binaries and settings as 1.2.3): `Check.cmd` and `Install.cmd` refuse a PC
   without an NVIDIA RTX card and name the card they found, instead of installing something that cannot run.
   Any RTX adapter passes (laptops also list their Intel/AMD graphics). If Windows cannot report the card, it
@@ -220,6 +242,18 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
   names cannot run this mod. `Microsoft Basic Display Adapter` means no graphics driver is installed: install
   the NVIDIA driver and run `Check.cmd` again. If you do have an RTX card and the name shown is wrong, open a
   command prompt in the package folder and run `Install.cmd -SkipGpuCheck`.
+- **The game runs, DLSS works, but the neural look is missing (DLAA only).** `host64\OptiScaler.log` has
+  `DLSS-NR create failed: ... create 0xBAD00001 (FAIL_FeatureNotSupported)` followed by `DLSS-NR did not run`,
+  and the frame cost is a couple of milliseconds instead of ~20 ms. Before the game starts, the helper log has
+  already said `feature 18 ... ADAPTER unsupported (min GPU architecture 0x1B0)`. Your `nvngx_dlssnr.dll` is
+  NVIDIA's original build, which runs on RTX 50 only. On RTX 20/30/40 get the modified build (see
+  [Requirements](#requirements)), put it in `Dependencies\` and run `Install.cmd`: it replaces the one in
+  `host64\` and backs it up. When the neural pass runs, `OptiScaler.log` has `DLSS-NR cost: ... ms` lines.
+  The helper's requirements line is a hint, not proof: on the tested RTX 4060 it reads `NotImplemented`, and the
+  neural pass runs. `OptiScaler.log` is what decides.
+- **`Check.cmd` says `nvngx_dlssnr.dll is NVIDIA's original build`.** Same cause, caught before installing:
+  replace the file as above. To install anyway for DLAA only, run `Install.cmd -AllowDlaaOnly` from a command
+  prompt in the package folder.
 - **The game crashes or closes on launch.** First run `Restore.cmd` if you need to play now: it puts your previous
   files back. Then, one at a time:
   1. Run `bootloader\host64\dlss5-feed-host64.exe --test`. Anything but `300/300 evaluates succeeded` points at

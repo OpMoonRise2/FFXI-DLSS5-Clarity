@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('Check','Install','Restore')][string]$Action='Check', [string]$Target, [string]$Backup, [ValidateRange(0,8192)][int]$DepthFilter=4096, [switch]$SkipGpuCheck)
+param([ValidateSet('Check','Install','Restore')][string]$Action='Check', [string]$Target, [string]$Backup, [ValidateRange(0,8192)][int]$DepthFilter=4096, [switch]$SkipGpuCheck, [switch]$AllowDlaaOnly)
 $ErrorActionPreference='Stop'
 if ([string]::IsNullOrWhiteSpace($Target)) { $Target = [IO.Directory]::GetParent($PSScriptRoot).FullName }
 function Hash([string]$p) { $s=[IO.File]::OpenRead($p); $h=[Security.Cryptography.SHA256]::Create(); try { ([BitConverter]::ToString($h.ComputeHash($s))).Replace('-','') } finally { $s.Dispose(); $h.Dispose() } }
@@ -45,9 +45,8 @@ $problems=[Collections.Generic.List[string]]::new()
 # crashed or got nothing after installing. Any RTX adapter counts (laptops also list their Intel/AMD graphics).
 # Refused only on a confirmed miss: when Windows cannot list the adapters (WMI broken, cmdlet missing), the
 # registry is tried, then it is a warning. -SkipGpuCheck overrides a wrong detection. Restore is never gated.
-$gpuNote=$null
+$gpuNote=$null;$gpus=@()
 if(!$SkipGpuCheck){
-    $gpus=@()
     try{$gpus=@(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop | ForEach-Object {$_.Name} | Where-Object {$_})}catch{}
     if(!$gpus.Count){try{$gpus=@(Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*' -ErrorAction SilentlyContinue | ForEach-Object {$_.DriverDesc} | Where-Object {$_})}catch{}}
     if(!$gpus.Count){$gpuNote='Windows did not report a graphics card, so it was not checked. This only works on an NVIDIA RTX card (GTX, AMD and Intel cards cannot run DLSS).'}
@@ -71,12 +70,46 @@ if(Test-Path -LiteralPath $existingFeed){
     $reuseShaders=$true
     if((Hash $existingFeed) -ne $manifest.Files.$feedEntry){$staleFeed=$true}
 }
-$runtime=@{}
+$runtime=@{};$runtimeNotes=[Collections.Generic.List[string]]::new()
 # The neural forwarder ships in payload (GPL, the tested 2026-09-20 build; see tools\known-good.json); NVIDIA's two runtimes are user-supplied.
+# A file in Dependencies\ is the one the user just supplied, so it replaces a different copy in host64\ (backed up).
+# Before 1.2.5 host64\ always won, and a corrected DLL put in Dependencies\ was silently ignored.
 foreach($name in @('nvngx_dlss.dll','nvngx_dlssnr.dll')){
     $installed=SafePath $root ('host64\'+$name);$supplied=Join-Path $PSScriptRoot ('Dependencies\'+$name)
-    if(Test-Path -LiteralPath $installed){$runtime[$name]=$installed}elseif(Test-Path -LiteralPath $supplied){$runtime[$name]=$supplied}else{$problems.Add("Supply Dependencies\$name (see README.md, Requirements)")}
+    if(Test-Path -LiteralPath $supplied){
+        $runtime[$name]=$supplied
+        if((Test-Path -LiteralPath $installed) -and (Hash $installed) -ne (Hash $supplied)){$runtimeNotes.Add("Dependencies\$name differs from host64\$name`: Install replaces it with the one in Dependencies\ (backed up; Restore.cmd puts it back).")}
+    }elseif(Test-Path -LiteralPath $installed){$runtime[$name]=$installed}else{$problems.Add("Supply Dependencies\$name (see README.md, Requirements)")}
     if($runtime.ContainsKey($name) -and !(IsX64 $runtime[$name])){$problems.Add("$name must be a valid x64 DLL.")}
+}
+# nvngx_dlssnr.dll comes in two builds that both say 310.8.0. NVIDIA's signed original creates the neural feature on
+# RTX 50 only: on RTX 20/30/40 it fails (OptiScaler.log: create 0xBAD00001 FAIL_FeatureNotSupported) and the game
+# silently gets DLAA alone. The modified build (RenoDX Discord) runs on RTX 20/30/40; editing it broke NVIDIA's
+# signature, which is how an unknown copy is told apart. The tested copy (played on, RTX 4060) and a copy that
+# failed this way on an RTX 4070 Ti (2026-10-19 report; the tested copy fixed it) are recognised by hash, so the
+# common cases do not depend on the signature cmdlet being available.
+$testedDlssNr='8270B350CD82DE5CE89806872CDD6B6A9249B80836B91BBEB3573470744CC206'
+$originalDlssNr=@('E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E')
+function DlssNrBuild([string]$p){
+    $h=Hash $p
+    if($h -eq $testedDlssNr){return 'tested'};if($h -in $originalDlssNr){return 'original'}
+    try{$status=[string](Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop).Status}catch{return 'unknown'}
+    if($status -eq 'Valid'){return 'original'};if($status -eq 'HashMismatch'){return 'modified'};return 'unknown'
+}
+# GeForce RTX x0x0 names the generation; Blackwell workstation cards are RTX 50 class. Other names (TITAN RTX,
+# RTX A4000, RTX 5000 Ada) are not guessed, and no refusal is based on them.
+$rtx50=@($gpus | Where-Object {$_ -match 'GeForce RTX 50\d0|Blackwell'}).Count -gt 0
+$rtxOlder=@($gpus | Where-Object {$_ -match 'GeForce RTX [234]0\d0'} | Select-Object -Unique)
+if($runtime.ContainsKey('nvngx_dlssnr.dll') -and !$rtx50){
+    $dlssNrFile=$(if($runtime['nvngx_dlssnr.dll'].StartsWith($PSScriptRoot,[StringComparison]::OrdinalIgnoreCase)){'Dependencies\nvngx_dlssnr.dll'}else{'host64\nvngx_dlssnr.dll'})
+    $build=DlssNrBuild $runtime['nvngx_dlssnr.dll']
+    $fix='Get the modified nvngx_dlssnr.dll for RTX 20/30/40 (see README.md, Requirements), put it in Dependencies\ and run Check.cmd again: Install then replaces the one in host64\ (backed up).'
+    if($build -eq 'original' -and $rtxOlder.Count){
+        $msg="$dlssNrFile is NVIDIA's original build, which runs the neural pass on RTX 50 cards only. On your $($rtxOlder -join ', ') DLSS 5 would silently do nothing (DLAA only). $fix"
+        if($AllowDlaaOnly){$runtimeNotes.Add("WARNING: $msg Installing anyway (-AllowDlaaOnly).")}else{$problems.Add("$msg To install for DLAA only, run Install.cmd -AllowDlaaOnly.")}
+    }
+    elseif($build -eq 'original'){$runtimeNotes.Add("WARNING: $dlssNrFile is NVIDIA's original build, which runs the neural pass on RTX 50 cards only. On an RTX 20/30/40 card you get DLAA only. $fix")}
+    elseif($build -ne 'tested' -and $rtxOlder.Count){$runtimeNotes.Add("$dlssNrFile is not the tested build. If the neural pass does not run (no 'DLSS-NR cost' lines in host64\OptiScaler.log), see README.md, Troubleshooting.")}
 }
 $preserveWrappers=@{};$replacedWrappers=[Collections.Generic.List[string]]::new()
 # Previously working Ashita control: dgVoodoo 4.8.2.134, D3D11 FL11.
@@ -112,6 +145,7 @@ Write-Output "FFXI Clarity portable preflight: $root"
 if($gpuNote){Write-Output "WARNING: $gpuNote"}
 if($problems.Count){$problems | ForEach-Object {Write-Output "NEEDED: $_"};Write-Output 'Nothing was changed. Fix the NEEDED lines above and run Check.cmd again.';if($Action -eq 'Install'){throw 'No installation files changed.'};return}
 $replacedWrappers | ForEach-Object {Write-Output $_}
+$runtimeNotes | ForEach-Object {Write-Output $_}
 if($dgFixed){Write-Output 'dgVoodoo.conf is not set to Direct3D 11 feature level 11: Install sets OutputAPI = d3d11_fl11_0 (backed up). Phoenix launcher rewrites this file every launch: set its graphics output to D3D11 there too.'}
 Write-Output 'File prerequisites passed. GPU, driver and live rendering still require the host test and gameplay check.'
 if($reuseShaders){
@@ -134,7 +168,7 @@ $payload=Join-Path $PSScriptRoot 'payload'
 foreach($e in $manifest.Files.PSObject.Properties){if($e.Name.StartsWith('payload\')){$rel=$e.Name.Substring(8);if($preserveWrappers.ContainsKey($rel)){continue};$dest=SafePath $root $rel;if(!(Test-Path -LiteralPath $dest) -or (Hash $dest) -ne $e.Value){$changes[$rel]=@{Source=(Join-Path $PSScriptRoot $e.Name)}}}}
 # The feeder effect in an existing reshade-shaders\ must be the one built with the shipped add-on.
 if($staleFeed){$changes['reshade-shaders\Shaders\DLSS5_Feed.fx']=@{Source=(Join-Path $PSScriptRoot $feedEntry)}}
-foreach($n in $runtime.Keys){$rel='host64\'+$n;if(!(Test-Path -LiteralPath (SafePath $root $rel))){$changes[$rel]=@{Source=$runtime[$n]}}}
+foreach($n in $runtime.Keys){$rel='host64\'+$n;$dest=SafePath $root $rel;if(!(Test-Path -LiteralPath $dest) -or (Hash $dest) -ne (Hash $runtime[$n])){$changes[$rel]=@{Source=$runtime[$n]}}}
 # Tested configuration (defaults\): used whole when the file is missing, never over an existing one.
 $defaults=Join-Path $PSScriptRoot 'defaults'
 $opti=ReadText (SafePath $root 'host64\OptiScaler.ini')
@@ -202,5 +236,5 @@ try{
     throw $failure
 }finally{@{Target=$root;Files=@($records.ToArray());Version=$manifest.Version} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backupDir 'receipt.json') -Encoding UTF8}
 Write-Output "Installed. Backup: $backupDir"
-Write-Output 'Select FFXI-Clarity.ini in ReShade for the first check. Existing presets remain available. Run host64\dlss5-feed-host64.exe --test before launching FFXI.'
+Write-Output 'Select FFXI-Clarity.ini in ReShade for the first check. Existing presets remain available. Run Test.cmd before launching FFXI.'
 ReportLightingPack
