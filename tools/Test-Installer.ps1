@@ -174,7 +174,9 @@ $cl = Fixture 'collect logs'; Copy-Item "$xb\dgVoodoo.conf" "$cl\dgVoodoo.conf";
 [IO.File]::WriteAllText("$cl\host64\OptiScaler.log", "DLSS v310.9.1 loaded`r`n")
 $before = (Get-ChildItem $cl -Recurse -File | ForEach-Object { "$($_.FullName)|$(Hash $_.FullName)" }) -join "`n"
 $clOut = Join-Path $root 'collect out'; $env:CLARITY_NO_EXPLORER = '1'
-& (Join-Path $Package 'CollectLogs.ps1') -Target $cl -OutDir $clOut | Out-Null
+# The running game holds its logs open for writing; the collector must still read them
+$held = [IO.File]::Open("$cl\host64\OptiScaler.log", 'Open', 'Write', 'Read')
+try { & (Join-Path $Package 'CollectLogs.ps1') -Target $cl -OutDir $clOut | Out-Null } finally { $held.Dispose() }
 Remove-Item Env:\CLARITY_NO_EXPLORER
 $after = (Get-ChildItem $cl -Recurse -File | ForEach-Object { "$($_.FullName)|$(Hash $_.FullName)" }) -join "`n"
 Assert ($before -eq $after) 'collect: install folder unchanged'
@@ -184,7 +186,7 @@ $unz = Join-Path $root 'collect unzipped'; Add-Type -AssemblyName System.IO.Comp
 $za = [IO.Compression.ZipFile]::OpenRead($zipPath[0].FullName); $names = @($za.Entries | ForEach-Object FullName); $za.Dispose()
 Assert (!($names -match '\\')) 'collect: zip paths use forward slashes'
 [IO.Compression.ZipFile]::ExtractToDirectory($zipPath[0].FullName, $unz)
-Assert ((Test-Path "$unz\files\host64\OptiScaler.log") -and (Test-Path "$unz\check.txt") -and (Test-Path "$unz\system.txt") -and (Test-Path "$unz\crashes.txt")) 'collect: logs, Check output, system and crash records included'
+Assert ((Test-Path "$unz\files\host64\OptiScaler.log") -and (Test-Path "$unz\check.txt") -and (Test-Path "$unz\system.txt") -and (Test-Path "$unz\crashes.txt")) 'collect: logs (one held open for writing), Check output, system and crash records included'
 $feed = Get-Content -Raw "$unz\files\dlss5-feed.log"
 Assert ($feed -match 'C:\\Users\\<user>\\Ashita' -and $feed -notmatch [regex]::Escape("\$env:USERNAME\")) 'collect: Windows user name scrubbed from logs'
 Assert ((Hash "$unz\files\dgVoodoo.conf") -eq (Hash "$cl\dgVoodoo.conf")) 'collect: binary dgVoodoo.conf copied byte for byte'

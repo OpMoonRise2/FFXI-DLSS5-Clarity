@@ -29,8 +29,14 @@ foreach($rel in $files){
     $p=Join-Path $root $rel
     if(!(Test-Path -LiteralPath $p)){$missing.Add($rel);continue}
     $dest=Join-Path $work ('files\'+$rel);[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent))
-    # A binary dgVoodoo.conf is copied as is; text is scrubbed
-    try{$bytes=[IO.File]::ReadAllBytes($p);if([Array]::IndexOf($bytes,[byte]0) -ge 0){[IO.File]::WriteAllBytes($dest,$bytes)}else{[IO.File]::WriteAllText($dest,(Scrub ([IO.File]::ReadAllText($p))),[Text.UTF8Encoding]::new($false))}}catch{$missing.Add("$rel (unreadable: $($_.Exception.Message))")}
+    # Opened with sharing: the game and helper keep their logs open while running. A binary dgVoodoo.conf is
+    # copied as is; text is scrubbed.
+    try{
+        $fs=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]'ReadWrite,Delete')
+        try{$ms=[IO.MemoryStream]::new();$fs.CopyTo($ms);$bytes=$ms.ToArray()}finally{$fs.Dispose()}
+        if([Array]::IndexOf($bytes,[byte]0) -ge 0){[IO.File]::WriteAllBytes($dest,$bytes)}
+        else{$r=[IO.StreamReader]::new([IO.MemoryStream]::new($bytes),$true);try{$text=$r.ReadToEnd()}finally{$r.Dispose()};[IO.File]::WriteAllText($dest,(Scrub $text),[Text.UTF8Encoding]::new($false))}
+    }catch{$missing.Add("$rel (unreadable: $($_.Exception.Message))")}
 }
 
 # What is installed: every file in bootloader\ and host64\ with size, date, version and hash. Another mod's
