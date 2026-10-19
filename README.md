@@ -35,7 +35,8 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 
 ## Requirements
 
-- An NVIDIA RTX GPU. NVIDIA officially enables DLSS 5 neural rendering on RTX 50 cards only. This package
+- **An NVIDIA RTX GPU** (GeForce RTX 20 series or newer, or an RTX workstation card). GTX, MX, AMD and Intel
+  cards cannot run DLSS: `Check.cmd` refuses them. NVIDIA officially enables DLSS 5 neural rendering on RTX 50 cards only. This package
   was tested on an **RTX 4060 8GB** with drivers **616.92 and 616.56** (the current stack was played on
   616.56). On RTX 20/30/40, whether the neural pass runs depends on the `nvngx_dlssnr.dll` you supply
   (see the DLSS5-Feeder README); if it does not run, you still get DLAA.
@@ -47,7 +48,7 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.3\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.4\`.
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder (skip if your `bootloader\host64\` already has them).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
 4. Run `bootloader\host64\dlss5-feed-host64.exe --test` once; expect `300/300 evaluates succeeded`.
@@ -111,7 +112,7 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
     (for example D3D12) gets `OutputAPI = d3d11_fl11_0`, everything else kept.
 - **Backups:** every file it replaces goes to `FFXI-Clarity-backup-<id>\` with a receipt. `Restore.cmd` puts
   them back and moves the files it added aside; it stops if anything changed since the install.
-- **It refuses, and writes nothing,** when FFXI or the helper is running, `d3d8.dll` / `dxgi.dll` belong to
+- **It refuses, and writes nothing,** when Windows reports no NVIDIA RTX card, FFXI or the helper is running, `d3d8.dll` / `dxgi.dll` belong to
   another wrapper (not dgVoodoo / ReShade), `dgVoodoo.conf` is in dgVoodoo's binary format, another neural
   consumer (RenoDX, Deep Fried Chicken) is in `host64\`, the NVIDIA DLLs are missing, or a package file fails
   its hash check. Each `NEEDED:` line in `Check.cmd` names the file and what to do.
@@ -146,6 +147,10 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.2.4** (installer only; same binaries and settings as 1.2.3): `Check.cmd` and `Install.cmd` refuse a PC
+  without an NVIDIA RTX card and name the card they found, instead of installing something that cannot run.
+  Any RTX adapter passes (laptops also list their Intel/AMD graphics). If Windows cannot report the card, it
+  warns and continues. `Restore.cmd` is not affected.
 - **1.2.3** (support tools only; same binaries, settings and installer behaviour as 1.2.2):
   `CollectLogs.cmd` saves one zip with every log, config, the installed-file list with versions, `Check.cmd`'s
   output, GPU/driver and recent crash records (Windows user and PC names removed), so a problem report needs one
@@ -211,6 +216,10 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
 `bootloader\host64\OptiScaler.log` (upscaler and neural pass), `bootloader\ReShade.log` and `host64\ReShade.log`.
 `CollectLogs.cmd` gathers all of them (see [Reporting a problem](#reporting-a-problem)).
 
+- **`Check.cmd` says `This needs an NVIDIA RTX graphics card`.** DLSS runs only on RTX cards, so the card it
+  names cannot run this mod. `Microsoft Basic Display Adapter` means no graphics driver is installed: install
+  the NVIDIA driver and run `Check.cmd` again. If you do have an RTX card and the name shown is wrong, open a
+  command prompt in the package folder and run `Install.cmd -SkipGpuCheck`.
 - **The game crashes or closes on launch.** First run `Restore.cmd` if you need to play now: it puts your previous
   files back. Then, one at a time:
   1. Run `bootloader\host64\dlss5-feed-host64.exe --test`. Anything but `300/300 evaluates succeeded` points at

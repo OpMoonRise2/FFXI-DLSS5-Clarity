@@ -38,7 +38,7 @@ body:
     id: version
     attributes:
       label: Clarity version
-      placeholder: "1.2.3"
+      placeholder: "1.2.4"
     validations:
       required: true
   - type: dropdown
