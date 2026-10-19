@@ -146,7 +146,7 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
-- **Next release** (support tools only; same binaries, settings and installer behaviour as 1.2.2):
+- **1.2.3** (support tools only; same binaries, settings and installer behaviour as 1.2.2):
   `CollectLogs.cmd` saves one zip with every log, config, the installed-file list with versions, `Check.cmd`'s
   output, GPU/driver and recent crash records (Windows user name removed), so a problem report needs one
   attachment. GitHub issue form, and a crash-on-launch entry in Troubleshooting.
