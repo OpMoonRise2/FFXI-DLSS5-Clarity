@@ -187,8 +187,20 @@ foreach($c in $conflicts){$problems.Add("host64\$($c.Name) is another neural con
 # DLSS feed rebuilds every few seconds. Supersampling above 1 restores the split, bump mapping on matches the
 # Ashita setup the toggler list was taken from, and the depth filter follows the (non-square) 3D size. The
 # launcher rewrites the registry from settings.xml on every start, so only settings.xml is edited.
-# Found automatically when the bootloader folder sits inside the Windower folder; otherwise pass -Windower.
+# Found automatically when the bootloader folder sits inside the Windower folder; otherwise pass -Windower
+# (retail: the PlayOnline folder holding pol.exe is the target, and Windower lives elsewhere).
 $win=$null
+# Where Windower starts a profile's <executable> (pol.exe when unset), in the launcher's own order: the path as
+# given, then beside Windower, then the PlayOnline install folder from the registry (retail).
+function WindowerExe([string]$exe,[string]$winDir){
+    if([IO.Path]::IsPathRooted($exe)){return [IO.Path]::GetFullPath($exe)}
+    $beside=[IO.Path]::GetFullPath((Join-Path $winDir $exe));if(Test-Path -LiteralPath $beside){return $beside}
+    foreach($k in 'PlayOnlineUS','PlayOnlineEU','PlayOnline'){
+        $pol=(Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\$k\InstallFolder" -ErrorAction SilentlyContinue).'1000'
+        if($pol){$p=[IO.Path]::GetFullPath((Join-Path $pol $exe));if(Test-Path -LiteralPath $p){return $p}}
+    }
+    return $beside
+}
 if(!$Windower){$up=Split-Path $root -Parent;if($up -and (Test-Path -LiteralPath (Join-Path $up 'Windower.exe')) -and (Test-Path -LiteralPath (Join-Path $up 'settings.xml'))){$Windower=$up}}
 if($Windower -and !(Test-Path -LiteralPath $Windower -PathType Container)){$problems.Add("-Windower `"$Windower`" is not a folder. Pass the folder that holds Windower.exe and settings.xml (for example -Windower `"D:\Games\Windower4`").");$Windower=$null}
 if($Windower){
@@ -199,13 +211,13 @@ if($Windower){
         try{$winXml=ReadWindowerXml $winSettings}catch{$winXml=$null;$problems.Add("Windower settings.xml could not be read ($($_.Exception.Message)). Open and close the Windower launcher to rewrite it, then run Check.cmd again.")}
         if($winXml){
             # Windower uses a profile's <executable> as the game loader; pol.exe when unset.
-            $rootPrefix=$root.TrimEnd('\')+'\';$winProfiles=@()
+            $rootPrefix=$root.TrimEnd('\')+'\';$winProfiles=@();$started=@()
             foreach($node in $winXml.Doc.SelectNodes('/settings/profile')){
                 $exe=$node.SelectSingleNode('executable');$exe=$(if($exe -and $exe.InnerText.Trim()){$exe.InnerText.Trim()}else{'pol.exe'})
-                $full=$(if([IO.Path]::IsPathRooted($exe)){[IO.Path]::GetFullPath($exe)}else{[IO.Path]::GetFullPath((Join-Path $winDir $exe))})
+                $full=WindowerExe $exe $winDir;$started+=$full
                 if($full.StartsWith($rootPrefix,[StringComparison]::OrdinalIgnoreCase)){$winProfiles+=$node}
             }
-            if(!$winProfiles.Count){$problems.Add("No Windower profile in $winSettings starts a loader from $root. In the Windower launcher, set the profile's executable to the loader in this folder (for example $(Join-Path $root 'xiloader.exe')), save, close the launcher, then run Check.cmd again.")}
+            if(!$winProfiles.Count){$problems.Add("No Windower profile in $winSettings starts a game from $root (they start: $(($started | Select-Object -Unique) -join ', ')). Install into the folder your profile starts: on retail the PlayOnline folder that holds pol.exe, on a private server the folder holding its loader (or set the profile's executable to the loader in this folder, for example $(Join-Path $root 'xiloader.exe'), in the Windower launcher). Then run Check.cmd again.")}
             else{
                 # The launcher's last start left the window size in the registry; used when the profile has none.
                 $reg=$null;foreach($k in 'PlayOnlineUS','PlayOnline','PlayOnlineEU'){$p="HKLM:\SOFTWARE\WOW6432Node\$k\SquareEnix\FinalFantasyXI";if(Test-Path $p){$reg=Get-ItemProperty $p;break}}

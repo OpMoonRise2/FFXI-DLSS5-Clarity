@@ -64,8 +64,9 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.8\`.
-   On Windower 4 that is the folder holding the loader your Windower profile starts (see [Windower 4](#windower-4)).
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.9\`.
+   On Windower 4 that is the folder your Windower profile starts the game from: the folder holding its loader
+   on a private server, or the PlayOnline folder holding `pol.exe` on retail (see [Windower 4](#windower-4)).
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder. You can skip this if your `bootloader\host64\` already
    has them; a file you put in `Dependencies\` replaces a different one in `host64\` (backed up).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
@@ -104,12 +105,18 @@ MSAA off: with MSAA on, the Shader Toggler can no longer keep the effects off th
 
 ## Windower 4
 
-Windower 4 works when its launcher starts the loader in this bootloader folder (the profile's executable is,
-for example, `bootloader\xiloader.exe`). Close the Windower launcher and the game, then run `Check.cmd` and
-`Install.cmd` as usual. When the bootloader folder sits inside the Windower folder it is found by itself;
-otherwise pass it: `Install.cmd -Windower "D:\Games\Windower4"`.
+Windower 4 works on private servers and on retail. Close the Windower launcher and the game first.
 
-For the profile that starts this folder's loader, the installer sets these in Windower's `settings.xml`.
+- **Private server:** extract the package into the folder holding the loader your Windower profile starts
+  (the profile's executable is, for example, `bootloader\xiloader.exe`). When that folder sits inside the
+  Windower folder it is found by itself: run `Check.cmd` and `Install.cmd` as usual. Otherwise pass Windower's
+  folder: `Install.cmd -Windower "D:\Games\Windower4"`.
+- **Retail:** your profile starts `pol.exe`, so extract the package into the PlayOnline folder that holds it
+  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.2.9\`)
+  and pass Windower's folder: `Check.cmd -Windower "C:\Windower4"`, then `Install.cmd -Windower "C:\Windower4"`.
+  The installer finds `pol.exe` the way Windower does (beside Windower, then PlayOnline's install folder).
+
+For the profile that starts the game from this folder, the installer sets these in Windower's `settings.xml`.
 The Windower launcher writes them to the registry on every start, so they last:
 
 | Setting | Value | Why |
@@ -208,6 +215,13 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.2.9** (installer, tests and README; same binaries and settings as 1.2.8): **retail Windower.** 1.2.8 only
+  recognised Windower profiles that start a loader from the bootloader folder, so a retail profile (which
+  starts `pol.exe`) was refused ([#10](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/10)).
+  Profiles are now resolved the way the Windower launcher does it (the path as given, then beside Windower,
+  then PlayOnline's install folder from the registry), so a package in the PlayOnline folder with
+  `-Windower <folder>` gets the same supersampling, bump mapping and depth filter. The refusal now names what
+  each profile starts and where to install instead.
 - **1.2.8** (installer, support tools and README; same binaries and settings as 1.2.7): **Windower 4 support.**
   Under Windower the effects started inside the 3D scene, so characters blinked and lost shading, nameplates
   and tunnel shadows moved with draw order, and the DLSS feed rebuilt every few seconds. The cause: Windower
