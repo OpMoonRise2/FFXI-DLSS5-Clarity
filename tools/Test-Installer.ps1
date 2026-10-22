@@ -1,5 +1,6 @@
 # Filesystem tests for installer\Setup.ps1 against throwaway fake bootloaders. No game or GPU involved.
-param([Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][string]$NvidiaDir)
+# -OldD3d8: dgVoodoo 2.87.2's D3D8.dll (shipped by 1.2.x) for the upgrade case; skipped when not given.
+param([Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][string]$NvidiaDir, [string]$OldD3d8)
 $ErrorActionPreference = 'Stop'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('ffxi-clarity-test-' + [guid]::NewGuid().ToString('N'))
 function Assert($c, $m) { if (!$c) { throw "FAIL: $m" }; "PASS: $m" }
@@ -352,6 +353,18 @@ try {
     $chk = (& $setup -Action Check -Target $pol) -join "`n"
     Assert ($chk -notmatch 'Windower') 'windower retail: without -Windower nothing is assumed'
 } finally { $global:ClarityFakePolDir = $null }
+
+# dgVoodoo 2.87.2 (1.2.x's build) crashes on some RTX 50 PCs: it is replaced with its own message, and restorable
+if ($OldD3d8) {
+    $o2 = Fixture 'old dgvoodoo'; Copy-Item -LiteralPath $OldD3d8 -Destination "$o2\d3d8.dll"; $old = Hash "$o2\d3d8.dll"
+    $chk = (& $setup -Action Check -Target $o2) -join "`n"
+    Assert ($chk -match 'd3d8.dll is dgVoodoo 2.87.2 \(shipped by Clarity 1.2.x\).*Install replaces it with dgVoodoo 2.87.5' -and $chk -notmatch 'NEEDED') 'dgVoodoo 2.87.2: Check announces the upgrade'
+    & $setup -Action Install -Target $o2 | Out-Null
+    Assert ((Hash "$o2\d3d8.dll") -eq (Hash (Join-Path $Package 'payload\d3d8.dll'))) 'dgVoodoo 2.87.2: replaced with the shipped 2.87.5'
+    $bk = (Get-ChildItem $o2 -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+    & $setup -Action Restore -Target $o2 -Backup $bk | Out-Null
+    Assert ((Hash "$o2\d3d8.dll") -eq $old) 'dgVoodoo 2.87.2: restore puts it back'
+} else { 'SKIP: dgVoodoo 2.87.2 upgrade (pass -OldD3d8)' }
 
 Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus, ClarityFakeSignature, ClarityFakePolDir -Scope Global
 Remove-Item $root -Recurse -Force

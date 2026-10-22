@@ -151,9 +151,12 @@ if($runtime.ContainsKey('nvngx_dlssnr.dll') -and !$rtx50){
     elseif($build -ne 'tested' -and $rtxOlder.Count){$runtimeNotes.Add("$dlssNrFile is not the tested build. If the neural pass does not run (no 'DLSS-NR cost' lines in host64\OptiScaler.log), see README.md, Troubleshooting.")}
 }
 $preserveWrappers=@{};$replacedWrappers=[Collections.Generic.List[string]]::new()
-# Previously working Ashita control: dgVoodoo 4.8.2.134, D3D11 FL11.
-# Match exact reviewed bytes, not just spoofable version metadata.
-$knownD3d8=@('85284D3024D6AD7D4B4154CD96B97E0D64F28F6A0F7AD490E5BE70D626F62604')
+# dgVoodoo 2.87.2 and 2.87.5 both carry FileVersion 4.8.2.134. 1.2.x shipped 2.87.2, which crashes on start-up
+# (access violation at d3d8.dll+0xa33cc while the device is created) on RTX 50 PCs with a second adapter, and
+# "replaced" a launcher's working 2.87.5 with it (#11, #12). 2.87.5 is shipped now; 2.87.2 is replaced like any
+# other build, with its own message. Matched by exact bytes, not spoofable version metadata.
+$knownD3d8=@()
+$crashingD3d8=@('85284D3024D6AD7D4B4154CD96B97E0D64F28F6A0F7AD490E5BE70D626F62604')
 # Another build of the same wrapper (a launcher's or another mod's dgVoodoo / ReShade) is replaced by the tested
 # one and backed up like any replaced file. Metadata only decides "same product" here, never "keep it": a file
 # that is some other wrapper is still never overwritten. 1.2.1 refused every other dgVoodoo / ReShade build.
@@ -163,6 +166,7 @@ foreach($pair in @(@('d3d8.dll','dgVoodoo'),@('dxgi.dll','ReShade'),@('host64\dx
         $hash=Hash $p
         if($hash -eq $manifest.Files.('payload\'+$pair[0])){$preserveWrappers[$pair[0]]=$true}
         elseif($pair[0] -eq 'd3d8.dll' -and $hash -in $knownD3d8){$preserveWrappers[$pair[0]]=$true}
+        elseif($pair[0] -eq 'd3d8.dll' -and $hash -in $crashingD3d8){$replacedWrappers.Add('Existing d3d8.dll is dgVoodoo 2.87.2 (shipped by Clarity 1.2.x), which crashes on start-up on some RTX 50 PCs: Install replaces it with dgVoodoo 2.87.5 (backed up; Restore.cmd puts it back).')}
         else{
             $v=(Get-Item -LiteralPath $p).VersionInfo
             if($v.ProductName -eq $pair[1]){$replacedWrappers.Add("Existing $($pair[0]) is $($pair[1]) $($v.ProductVersion), not the tested build: Install replaces it with the tested one (backed up; Restore.cmd puts it back).")}

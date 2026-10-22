@@ -3,7 +3,8 @@
   Assembles the redistributable FFXI-DLSS5-Clarity release folder and zip.
 
 .PARAMETER StackDir
-  A working FFXI bootloader that holds the stock third-party files: d3d8.dll (dgVoodoo2),
+  A working FFXI bootloader that holds the stock third-party files: d3d8.dll (dgVoodoo2 2.87.5; 2.87.2 crashes on
+  some RTX 50 PCs and is refused by known-good.json),
   dxgi.dll (ReShade 32-bit add-on build), dlss5-feed.addon32, ReshadeEffectShaderToggler.*,
   host64\dxgi.dll (ReShade 64-bit), host64\dlss5-feed-host64.exe, and DLSS5_Feed.fx, ReShade.fxh,
   ReShadeUI.fxh and vort_Shaders in reshade-shaders\ or ffxi-clarity-shaders\ (first folder that has each).
@@ -19,7 +20,7 @@
 #>
 param(
     [Parameter(Mandatory)][string]$StackDir,
-    [string]$Version = '1.2.9',
+    [string]$Version = '1.3.0',
     [string]$ForkCommit = ''
 )
 $ErrorActionPreference = 'Stop'

@@ -64,7 +64,7 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.9\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.3.0\`.
    On Windower 4 that is the folder your Windower profile starts the game from: the folder holding its loader
    on a private server, or the PlayOnline folder holding `pol.exe` on retail (see [Windower 4](#windower-4)).
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder. You can skip this if your `bootloader\host64\` already
@@ -112,7 +112,7 @@ Windower 4 works on private servers and on retail. Close the Windower launcher a
   Windower folder it is found by itself: run `Check.cmd` and `Install.cmd` as usual. Otherwise pass Windower's
   folder: `Install.cmd -Windower "D:\Games\Windower4"`.
 - **Retail:** your profile starts `pol.exe`, so extract the package into the PlayOnline folder that holds it
-  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.2.9\`)
+  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.0\`)
   and pass Windower's folder: `Check.cmd -Windower "C:\Windower4"`, then `Install.cmd -Windower "C:\Windower4"`.
   The installer finds `pol.exe` the way Windower does (beside Windower, then PlayOnline's install folder).
 
@@ -151,8 +151,8 @@ history. Picking other shader hashes only moves the problem.
 
 It works only inside the bootloader folder it is pointed at (by default, the bootloader the package folder sits in).
 
-- **Wrappers: installed if missing, kept if identical, replaced if another build:** `d3d8.dll` (dgVoodoo; one
-  other tested build is also kept), `dxgi.dll` and `host64\dxgi.dll` (ReShade). Another dgVoodoo or ReShade
+- **Wrappers: installed if missing, kept if identical, replaced if another build:** `d3d8.dll` (dgVoodoo 2.87.5;
+  2.87.2, which 1.2.x shipped, is replaced), `dxgi.dll` and `host64\dxgi.dll` (ReShade). Another dgVoodoo or ReShade
   build (from a launcher or another mod such as Deep Fried Chicken) is backed up and replaced by the tested one.
   A file that is some other wrapper is never overwritten: `Check.cmd` says which file to move aside.
 - **Added, or replaced when different:** `dlss5-feed.addon32`, `ReshadeEffectShaderToggler.addon32` and
@@ -215,6 +215,15 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.3.0** (dgVoodoo update; installer, tests and README): **fixes the crash on launch on RTX 50 PCs**
+  ([#11](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/11),
+  [#12](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/12)). 1.2.x shipped dgVoodoo 2.87.2, which
+  crashes with an access violation at `d3d8.dll+0xa33cc` while FFXI creates its device, seen on an RTX 5060
+  and an RTX 5090, each with a second graphics adapter. dgVoodoo 2.87.5 runs on the same PC. Both builds say
+  4.8.2.134, so on Phoenix the installer also replaced the launcher's working 2.87.5 with 2.87.2. 1.3.0 ships
+  2.87.5 (pinned in `tools\known-good.json`) and replaces 2.87.2 with its own message. Played on 2026-10-22
+  (Windower 4, RTX 4060, 2560x1440): Shader Toggler hashes, UI masking and depth unchanged. Everything else is
+  as in 1.2.9.
 - **1.2.9** (installer, tests and README; same binaries and settings as 1.2.8): **retail Windower.** 1.2.8 only
   recognised Windower profiles that start a loader from the bootloader folder, so a retail profile (which
   starts `pol.exe`) was refused ([#10](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/10)).
@@ -336,6 +345,10 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
 - **`Check.cmd` says `nvngx_dlssnr.dll is NVIDIA's original build`.** Same cause, caught before installing:
   replace the file as above. To install anyway for DLAA only, run `Install.cmd -AllowDlaaOnly` from a command
   prompt in the package folder.
+- **The game crashes on launch, and `crashes.txt` names `d3d8.dll` with fault offset `0x000a33cc`.** That is
+  dgVoodoo 2.87.2, which Clarity 1.2.0-1.2.9 shipped. It crashes while the game creates its device on some
+  RTX 50 PCs, notably with a second graphics adapter. Install 1.3.0 or newer, which ships dgVoodoo 2.87.5. On
+  Phoenix this also stops the installer replacing Phoenix's own 2.87.5 with the older build.
 - **The game crashes or closes on launch.** First run `Restore.cmd` if you need to play now: it puts your previous
   files back. Then, one at a time:
   1. Run `bootloader\host64\dlss5-feed-host64.exe --test`. Anything but `300/300 evaluates succeeded` points at
