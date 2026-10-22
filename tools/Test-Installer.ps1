@@ -9,7 +9,7 @@ function Get-Process { param($Name, $ErrorAction) @() }   # fixtures only: ignor
 # Global: inside Setup.ps1, $script: would mean Setup.ps1's own scope.
 $global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4060'); $global:ClarityFakeRegistryGpus = @()
 function Get-CimInstance { param($ClassName, $ErrorAction) if ($global:ClarityFakeGpus -contains 'THROW') { throw 'WMI unavailable' }; $global:ClarityFakeGpus | ForEach-Object { [pscustomobject]@{ Name = $_ } } }
-function Get-ItemProperty { param($Path, $ErrorAction) $global:ClarityFakeRegistryGpus | ForEach-Object { [pscustomobject]@{ DriverDesc = $_ } } }
+function Get-ItemProperty { param($Path, $ErrorAction) if ($Path -like '*\InstallFolder') { if ($global:ClarityFakePolDir) { [pscustomobject]@{ '1000' = $global:ClarityFakePolDir } }; return }; $global:ClarityFakeRegistryGpus | ForEach-Object { [pscustomobject]@{ DriverDesc = $_ } } }
 # Fixtures only: the signature status of an nvngx_dlssnr.dll that is not recognised by hash (Valid = NVIDIA's original,
 # HashMismatch = a modified build). THROW stands for a session where the cmdlet cannot load.
 $global:ClarityFakeSignature = 'HashMismatch'
@@ -327,7 +327,7 @@ Assert ((Get-Content -Raw "$($wf.Loader)\ReShade.ini") -match 'FilterResolutionW
 # Refusals: no profile starts this loader; a profile without a window size; a wrong -Windower folder
 $wn = WindowerFixture 'windower other loader' "  <profile name=`"`">`r`n    <width>2560</width>`r`n    <height>1440</height>`r`n    <executable>pol.exe</executable>`r`n  </profile>`r`n"
 $chk = (& $setup -Action Check -Target $wn.Loader) -join "`n"
-Assert ($chk -match 'NEEDED: No Windower profile in .* starts a loader from') 'windower: no matching profile is refused with the fix'
+Assert ($chk -match 'NEEDED: No Windower profile in .* starts a game from .*\(they start: .*pol\.exe\).*PlayOnline folder') 'windower: no matching profile is refused, naming what it starts and the fix'
 $refused = $false; try { & $setup -Action Install -Target $wn.Loader | Out-Null } catch { $refused = $true }
 Assert ($refused -and !(Test-Path "$($wn.Loader)\host64\winmm.dll")) 'windower: no matching profile, install writes nothing'
 $wr = WindowerFixture 'windower no size' "  <profile name=`"`">`r`n    <executable>{LOADER}</executable>`r`n  </profile>`r`n"
@@ -337,7 +337,22 @@ $chk = (& $setup -Action Check -Target $f -Windower (Join-Path $root 'no such fo
 Assert ($chk -match 'NEEDED: -Windower ".*no such folder" is not a folder') 'windower: a missing -Windower folder is a NEEDED line, not a crash'
 $chk = (& $setup -Action Check -Target $f -Windower $f) -join "`n"
 Assert ($chk -match 'NEEDED: No Windower.exe in') 'windower: -Windower pointing at another folder is refused'
+# Retail: the profile starts pol.exe (unset executable), which Windower finds in the PlayOnline install folder from
+# the registry. The package is installed there and Windower lives elsewhere, so -Windower is passed.
+$rw = Join-Path $root 'retail windower'; New-Item -ItemType Directory $rw -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $rw 'Windower.exe'), 'not a real exe')
+[IO.File]::WriteAllText((Join-Path $rw 'settings.xml'), "<?xml version=`"1.0`" encoding=`"utf-8`"?>`r`n<settings>`r`n  <profile name=`"`">`r`n    <width>1920</width>`r`n    <height>1080</height>`r`n  </profile>`r`n</settings>")
+$pol = Fixture 'retail\PlayOnlineViewer'; [IO.File]::WriteAllText((Join-Path $pol 'pol.exe'), 'not a real exe')
+$global:ClarityFakePolDir = $pol
+try {
+    $chk = (& $setup -Action Check -Target $pol -Windower $rw) -join "`n"
+    Assert ($chk -match 'Windower profile \(default\): 1920x1080, 3D drawn at 3072x1728' -and $chk -notmatch 'NEEDED') 'windower retail: pol.exe found through the PlayOnline install folder'
+    & $setup -Action Install -Target $pol -Windower $rw | Out-Null
+    Assert ((Get-Content -Raw (Join-Path $rw 'settings.xml')) -match '<supersampling>1.6</supersampling>' -and (Get-Content -Raw "$pol\ReShade.ini") -match 'FilterResolutionWidth=3072' -and (Get-Content -Raw "$pol\ReShade.ini") -match 'FilterResolutionHeight=1728') 'windower retail: supersampling set, depth filter 3072x1728'
+    $chk = (& $setup -Action Check -Target $pol) -join "`n"
+    Assert ($chk -notmatch 'Windower') 'windower retail: without -Windower nothing is assumed'
+} finally { $global:ClarityFakePolDir = $null }
 
-Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus, ClarityFakeSignature -Scope Global
+Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus, ClarityFakeSignature, ClarityFakePolDir -Scope Global
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'
