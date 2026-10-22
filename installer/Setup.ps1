@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('Check','Install','Restore')][string]$Action='Check', [string]$Target, [string]$Backup, [ValidateRange(0,8192)][int]$DepthFilter=4096, [switch]$SkipGpuCheck, [switch]$AllowDlaaOnly)
+param([ValidateSet('Check','Install','Restore')][string]$Action='Check', [string]$Target, [string]$Backup, [ValidateRange(0,8192)][int]$DepthFilter=4096, [switch]$SkipGpuCheck, [switch]$AllowDlaaOnly, [string]$Windower, [ValidateRange(1.1,4.0)][double]$SuperSampling=1.6)
 $ErrorActionPreference='Stop'
 if ([string]::IsNullOrWhiteSpace($Target)) { $Target = [IO.Directory]::GetParent($PSScriptRoot).FullName }
 function Hash([string]$p) { $s=[IO.File]::OpenRead($p); $h=[Security.Cryptography.SHA256]::Create(); try { ([BitConverter]::ToString($h.ComputeHash($s))).Replace('-','') } finally { $s.Dispose(); $h.Dispose() } }
@@ -29,7 +29,22 @@ function SafePath($base,$relative) {
 $root=(Resolve-Path -LiteralPath $Target).Path
 $manifest=Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') | ConvertFrom-Json
 foreach($entry in $manifest.Files.PSObject.Properties){if((Hash (SafePath $PSScriptRoot $entry.Name)) -ne $entry.Value){throw "Package is damaged: $($entry.Name)"}}
-if($Action -ne 'Check' -and @(Get-Process pol,xiloader,phoenix-loader,dlss5-feed-host64 -ErrorAction SilentlyContinue).Count){throw 'Close all FFXI / PlayOnline sessions and feeder hosts first.'}
+if($Action -ne 'Check' -and @(Get-Process pol,xiloader,phoenix-loader,dlss5-feed-host64,Windower -ErrorAction SilentlyContinue).Count){throw 'Close all FFXI / PlayOnline sessions, the Windower launcher and feeder hosts first.'}
+# Windower's settings.xml may carry an XML 1.1 declaration, which .NET's XmlDocument refuses; it is parsed as 1.0
+# and written back with its own declaration. Windower reads either.
+function ReadWindowerXml([string]$p){
+    $text=[IO.File]::ReadAllText($p);$decl='<?xml version="1.0" encoding="utf-8"?>'
+    if($text.TrimStart([char]0xFEFF) -match '^(<\?xml[^>]*\?>)'){$decl=$Matches[1]}
+    $doc=New-Object Xml.XmlDocument;$doc.LoadXml(($text.TrimStart([char]0xFEFF) -replace '^<\?xml[^>]*\?>',''))
+    $head=[byte[]]::new(3);$s=[IO.File]::OpenRead($p);try{$n=$s.Read($head,0,3)}finally{$s.Dispose()}
+    return @{Doc=$doc;Decl=$decl;Bom=($n -eq 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF)}
+}
+function WindowerXmlText($x){
+    $sw=New-Object IO.StringWriter;$ws=New-Object Xml.XmlWriterSettings;$ws.Indent=$true;$ws.IndentChars='  ';$ws.OmitXmlDeclaration=$true;$ws.NewLineChars="`r`n"
+    $w=[Xml.XmlWriter]::Create($sw,$ws);try{$x.Doc.Save($w)}finally{$w.Dispose()}
+    return $x.Decl+"`r`n"+$sw.ToString()
+}
+function WriteWindowerXml($p,$x){[IO.File]::WriteAllText($p,(WindowerXmlText $x),[Text.UTF8Encoding]::new([bool]$x.Bom))}
 if($Action -eq 'Restore'){
     if(!$Backup){throw 'Specify -Backup with the backup directory printed after installation.'}
     $receipt=Get-Content -Raw -LiteralPath (Join-Path $Backup 'receipt.json') | ConvertFrom-Json
@@ -37,7 +52,27 @@ if($Action -eq 'Restore'){
     foreach($e in $receipt.Files){$p=SafePath $root $e.Path;if(!(Test-Path -LiteralPath $p) -or (Hash $p) -ne $e.After){throw "Changed since installation; restore stopped without writes: $($e.Path)"};if($e.Before -and (Hash (SafePath $Backup $e.Path)) -ne $e.Before){throw 'Backup hash mismatch.'}}
     $retired=Join-Path $root ('FFXI-Clarity-removed-'+[guid]::NewGuid().ToString('N'))
     foreach($e in $receipt.Files){$p=SafePath $root $e.Path;if($e.Before){Copy-Item -LiteralPath (SafePath $Backup $e.Path) -Destination $p -Force}else{$dest=SafePath $retired $e.Path;[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent));Move-Item -LiteralPath $p -Destination $dest}}
-    Write-Output "Restored original files. Newly added files were retained in $retired";return
+    Write-Output "Restored original files. Newly added files were retained in $retired"
+    # Windower rewrites settings.xml whenever its launcher saves, so a whole-file hash would block every restore.
+    # Only the elements Install set are put back, and only while they still hold the value Install wrote.
+    if($receipt.Windower){
+        $ws=$receipt.Windower.Settings
+        if(!(Test-Path -LiteralPath $ws)){Write-Output "Windower settings.xml not found at $ws; nothing to restore there. The original is in $(Join-Path $Backup 'windower-settings.xml').";return}
+        $x=ReadWindowerXml $ws
+        foreach($pr in $receipt.Windower.Profiles){
+            $node=@($x.Doc.SelectNodes('/settings/profile') | Where-Object {$_.GetAttribute('name') -eq $pr.Name})[0]
+            $label=$(if($pr.Name){"'$($pr.Name)'"}else{'(default)'})
+            if(!$node){Write-Output "Windower profile $label no longer exists; skipped.";continue}
+            foreach($s in $pr.Set){
+                $el=$node.SelectSingleNode($s.Element)
+                if(!$el -or $el.InnerText -ne $s.After){Write-Output "Windower profile $label`: <$($s.Element)> was changed after installation; kept as it is.";continue}
+                if($null -eq $s.Before){[void]$node.RemoveChild($el)}else{$el.InnerText=$s.Before}
+            }
+        }
+        WriteWindowerXml $ws $x
+        Write-Output "Windower settings.xml: the profile values Install set were put back. The original file is also in $(Join-Path $Backup 'windower-settings.xml')."
+    }
+    return
 }
 if(!@(Get-ChildItem -LiteralPath $root -File -Filter '*.exe').Count){throw 'Choose the folder containing the FFXI loader/game executable, not the launcher download directory.'}
 $problems=[Collections.Generic.List[string]]::new()
@@ -145,11 +180,70 @@ if($dg -and $dg -notmatch '(?im)^\s*OutputAPI\s*=\s*d3d11_fl11_0\s*$'){
 }
 $conflicts=@(Get-ChildItem -LiteralPath (Join-Path $root 'host64') -File -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^(renodx-dlss.*|deep-fried-chicken.*)\.addon64$'})
 foreach($c in $conflicts){$problems.Add("host64\$($c.Name) is another neural consumer (RenoDX / Deep Fried Chicken) and would fight OptiScaler for the neural pass. Move it out of host64 (put it back to switch back), then run Check.cmd again.")}
+# Windower 4 writes FFXI's background (3D) resolution as window size x <supersampling>, 1.0 unless set, so the
+# 3D scene is drawn at the swapchain's own size. The Shader Toggler's RESOLUTION match then fires inside the
+# scene instead of on the scale-down to the screen (Ashita's 4096x4096 keeps the two apart): effects land
+# mid-scene, characters blink and lose shading, nameplates and tunnel shadows move with draw order, and the
+# DLSS feed rebuilds every few seconds. Supersampling above 1 restores the split, bump mapping on matches the
+# Ashita setup the toggler list was taken from, and the depth filter follows the (non-square) 3D size. The
+# launcher rewrites the registry from settings.xml on every start, so only settings.xml is edited.
+# Found automatically when the bootloader folder sits inside the Windower folder; otherwise pass -Windower.
+$win=$null
+if(!$Windower){$up=Split-Path $root -Parent;if($up -and (Test-Path -LiteralPath (Join-Path $up 'Windower.exe')) -and (Test-Path -LiteralPath (Join-Path $up 'settings.xml'))){$Windower=$up}}
+if($Windower -and !(Test-Path -LiteralPath $Windower -PathType Container)){$problems.Add("-Windower `"$Windower`" is not a folder. Pass the folder that holds Windower.exe and settings.xml (for example -Windower `"D:\Games\Windower4`").");$Windower=$null}
+if($Windower){
+    $winDir=(Resolve-Path -LiteralPath $Windower).Path;$winSettings=Join-Path $winDir 'settings.xml'
+    if(!(Test-Path -LiteralPath (Join-Path $winDir 'Windower.exe'))){$problems.Add("No Windower.exe in $winDir. Pass the Windower 4 folder itself with -Windower.")}
+    elseif(!(Test-Path -LiteralPath $winSettings)){$problems.Add("No settings.xml in $winDir. Start the Windower launcher once, close it, then run Check.cmd again.")}
+    else{
+        try{$winXml=ReadWindowerXml $winSettings}catch{$winXml=$null;$problems.Add("Windower settings.xml could not be read ($($_.Exception.Message)). Open and close the Windower launcher to rewrite it, then run Check.cmd again.")}
+        if($winXml){
+            # Windower uses a profile's <executable> as the game loader; pol.exe when unset.
+            $rootPrefix=$root.TrimEnd('\')+'\';$winProfiles=@()
+            foreach($node in $winXml.Doc.SelectNodes('/settings/profile')){
+                $exe=$node.SelectSingleNode('executable');$exe=$(if($exe -and $exe.InnerText.Trim()){$exe.InnerText.Trim()}else{'pol.exe'})
+                $full=$(if([IO.Path]::IsPathRooted($exe)){[IO.Path]::GetFullPath($exe)}else{[IO.Path]::GetFullPath((Join-Path $winDir $exe))})
+                if($full.StartsWith($rootPrefix,[StringComparison]::OrdinalIgnoreCase)){$winProfiles+=$node}
+            }
+            if(!$winProfiles.Count){$problems.Add("No Windower profile in $winSettings starts a loader from $root. In the Windower launcher, set the profile's executable to the loader in this folder (for example $(Join-Path $root 'xiloader.exe')), save, close the launcher, then run Check.cmd again.")}
+            else{
+                # The launcher's last start left the window size in the registry; used when the profile has none.
+                $reg=$null;foreach($k in 'PlayOnlineUS','PlayOnline','PlayOnlineEU'){$p="HKLM:\SOFTWARE\WOW6432Node\$k\SquareEnix\FinalFantasyXI";if(Test-Path $p){$reg=Get-ItemProperty $p;break}}
+                $win=@{Settings=$winSettings;Profiles=@()}
+                foreach($node in $winProfiles){
+                    $name=$node.GetAttribute('name');$label=$(if($name){"'$name'"}else{'(default)'})
+                    $get={param($n) $e=$node.SelectSingleNode($n);if($e){$e.InnerText.Trim()}else{$null}}
+                    $w=0;$h=0;[void][int]::TryParse((& $get 'width'),[ref]$w);[void][int]::TryParse((& $get 'height'),[ref]$h)
+                    $set=@()
+                    if($w -le 0 -or $h -le 0){
+                        if($reg -and [int]$reg.'0001' -gt 0 -and [int]$reg.'0002' -gt 0){$w=[int]$reg.'0001';$h=[int]$reg.'0002';$set+=@{Element='width';Before=(& $get 'width');After="$w"},@{Element='height';Before=(& $get 'height');After="$h"}}
+                        else{$problems.Add("Windower profile $label has no window resolution. Set it in the Windower launcher, save, close the launcher, then run Check.cmd again.");continue}
+                    }
+                    $ss=0.0;$ssText=& $get 'supersampling'
+                    if(!$ssText -or ![double]::TryParse($ssText,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$ss) -or $ss -le 1.0){$ss=$SuperSampling;$set+=@{Element='supersampling';Before=$ssText;After=$ss.ToString([Globalization.CultureInfo]::InvariantCulture)}}
+                    if((& $get 'bumpmapping') -ne 'true'){$set+=@{Element='bumpmapping';Before=(& $get 'bumpmapping');After='true'}}
+                    # Same arithmetic as the launcher: float multiply, stored as a DWORD (rounded to even).
+                    $bgW=[Convert]::ToInt32([single]([single]$w*[single]$ss));$bgH=[Convert]::ToInt32([single]([single]$h*[single]$ss))
+                    $win.Profiles+=@{Name=$name;Label=$label;Node=$node;Set=$set;Width=$w;Height=$h;SS=$ss;BgW=$bgW;BgH=$bgH}
+                }
+                $sizes=@($win.Profiles | ForEach-Object {"$($_.BgW)x$($_.BgH)"} | Select-Object -Unique)
+                if($sizes.Count -gt 1){$problems.Add("Windower profiles starting from $root would give different 3D sizes ($($sizes -join ', ')), but ReShade's depth filter in this folder can match only one. Give them the same window resolution and supersampling, or point only one at this folder.")}
+            }
+        }
+    }
+}
 Write-Output "FFXI Clarity portable preflight: $root"
 if($gpuNote){Write-Output "WARNING: $gpuNote"}
 if($problems.Count){$problems | ForEach-Object {Write-Output "NEEDED: $_"};Write-Output 'Nothing was changed. Fix the NEEDED lines above and run Check.cmd again.';if($Action -eq 'Install'){throw 'No installation files changed.'};return}
 $replacedWrappers | ForEach-Object {Write-Output $_}
 $runtimeNotes | ForEach-Object {Write-Output $_}
+if($win){
+    foreach($pr in $win.Profiles){
+        $what=$(if($pr.Set.Count){'Install sets '+(($pr.Set | ForEach-Object {"$($_.Element)=$($_.After)"}) -join ', ')+' (Restore.cmd puts them back)'}else{'already set'})
+        Write-Output "Windower profile $($pr.Label): $($pr.Width)x$($pr.Height), 3D drawn at $($pr.BgW)x$($pr.BgH); $what."
+    }
+    Write-Output "ReShade.ini depth filter: Install sets $($win.Profiles[0].BgW)x$($win.Profiles[0].BgH) to match the Windower 3D size (-DepthFilter is not used with Windower)."
+}
 if($dgFixed){Write-Output 'dgVoodoo.conf is not set to Direct3D 11 feature level 11: Install sets OutputAPI = d3d11_fl11_0 (backed up). Phoenix launcher rewrites this file every launch: set its graphics output to D3D11 there too.'}
 Write-Output 'File prerequisites passed. GPU, driver and live rendering still require the host test and gameplay check.'
 if($reuseShaders){
@@ -219,7 +313,12 @@ if($rs){
 # resolution (registry 0003/0004). Lock the depth filter to it so the right buffer is picked on
 # every launch. Applied when no filter exists yet, or when -DepthFilter is passed explicitly.
 $depthIsFresh = $rs -notmatch '(?im)^FilterResolutionWidth='
-if($DepthFilter -gt 0 -and ($depthIsFresh -or $PSBoundParameters.ContainsKey('DepthFilter'))){
+if($win){
+    # Windower's 3D buffer is window size x supersampling, not square: always lock the filter to it.
+    $rs=SetIni $rs 'DEPTH' 'FilterResolutionWidth' "$($win.Profiles[0].BgW)"
+    $rs=SetIni $rs 'DEPTH' 'FilterResolutionHeight' "$($win.Profiles[0].BgH)"
+    $rs=SetIni $rs 'DEPTH' 'UseAspectRatioHeuristics' '4'
+}elseif($DepthFilter -gt 0 -and ($depthIsFresh -or $PSBoundParameters.ContainsKey('DepthFilter'))){
     $rs=SetIni $rs 'DEPTH' 'FilterResolutionWidth' "$DepthFilter"
     $rs=SetIni $rs 'DEPTH' 'FilterResolutionHeight' "$DepthFilter"
     $rs=SetIni $rs 'DEPTH' 'UseAspectRatioHeuristics' '4'
@@ -231,14 +330,26 @@ $backupDir=Join-Path $root ('FFXI-Clarity-backup-'+[guid]::NewGuid().ToString('N
 [void][IO.Directory]::CreateDirectory($backupDir)
 $records=[Collections.Generic.List[object]]::new()
 foreach($rel in ($changes.Keys | Sort-Object)){$p=SafePath $root $rel;$before=$null;if(Test-Path -LiteralPath $p){$before=Hash $p;$saved=SafePath $backupDir $rel;[void][IO.Directory]::CreateDirectory((Split-Path $saved -Parent));Copy-Item -LiteralPath $p -Destination $saved};$records.Add([pscustomobject]@{Path=$rel;Before=$before;After=$null})}
+# Windower's settings.xml lives outside the bootloader folder: kept whole in the backup, and recorded per element.
+$winRecord=$null
+if($win -and @($win.Profiles | Where-Object {$_.Set.Count}).Count){
+    Copy-Item -LiteralPath $win.Settings -Destination (Join-Path $backupDir 'windower-settings.xml')
+    $winRecord=[pscustomobject]@{Settings=$win.Settings;Profiles=@($win.Profiles | Where-Object {$_.Set.Count} | ForEach-Object {[pscustomobject]@{Name=$_.Name;Set=@($_.Set | ForEach-Object {[pscustomobject]$_})}})}
+}
 try{
     foreach($r in $records){$p=SafePath $root $r.Path;$c=$changes[$r.Path];[void][IO.Directory]::CreateDirectory((Split-Path $p -Parent));if($c.ContainsKey('Source')){Copy-Item -LiteralPath $c.Source -Destination $p -Force;if((Hash $p) -ne (Hash $c.Source)){throw 'Copy verification failed.'}}else{WriteText $p $c.Text};$r.After=Hash $p}
+    if($winRecord){
+        foreach($pr in $win.Profiles){foreach($s in $pr.Set){$el=$pr.Node.SelectSingleNode($s.Element);if(!$el){$el=$pr.Node.AppendChild($winXml.Doc.CreateElement($s.Element))};$el.InnerText=$s.After}}
+        WriteWindowerXml $win.Settings $winXml
+    }
 }catch{
     $failure=$_
     $failedFiles=Join-Path $backupDir 'failed-install-files'
     foreach($r in $records){$p=SafePath $root $r.Path;if($r.Before){Copy-Item -LiteralPath (SafePath $backupDir $r.Path) -Destination $p -Force}elseif(Test-Path -LiteralPath $p){$dest=SafePath $failedFiles $r.Path;[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent));Move-Item -LiteralPath $p -Destination $dest}}
+    if($winRecord){Copy-Item -LiteralPath (Join-Path $backupDir 'windower-settings.xml') -Destination $win.Settings -Force}
     throw $failure
-}finally{@{Target=$root;Files=@($records.ToArray());Version=$manifest.Version} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backupDir 'receipt.json') -Encoding UTF8}
+}finally{@{Target=$root;Files=@($records.ToArray());Windower=$winRecord;Version=$manifest.Version} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $backupDir 'receipt.json') -Encoding UTF8}
+if($winRecord){Write-Output "Windower settings.xml updated (supersampling / bump mapping). Do not lower supersampling to 1 in the Windower launcher: that brings the blinking back."}
 Write-Output "Installed. Backup: $backupDir"
 Write-Output 'Select FFXI-Clarity.ini in ReShade for the first check. Existing presets remain available. Run Test.cmd before launching FFXI.'
 ReportLightingPack

@@ -1,7 +1,7 @@
 # FFXI-DLSS5-Clarity
 
 DLSS DLAA + DLSS 5 neural rendering for **Final Fantasy XI**, packaged for the loaders people
-actually use (Ashita, HorizonXI, Phoenix, retail-style bootloaders), without blurring when the camera moves.
+actually use (Ashita, HorizonXI, Phoenix, Windower 4, retail-style bootloaders), without blurring when the camera moves.
 
 > **Use at your own risk.** Free, unofficial community mod, provided **as is, with no warranty**. The author is
 > **not liable** for any damage or loss from using it (see [DISCLAIMER.md](DISCLAIMER.md) and [LICENSE](LICENSE)).
@@ -24,7 +24,7 @@ that fixes the problems we hit on FFXI:
 | On a fresh install the helper window had no ReShade, so no **Ctrl+F9** panel in the game | **ReShade-first dxgi load**: OptiScaler loads the `dxgi.dll` beside the helper before Windows' own, every launch, not only when the helper wins a start-up race |
 
 **FFXI only.** Every part is set up for FFXI: dgVoodoo's Direct3D 8 path, the depth filter (FFXI draws its
-3D scene into a square background buffer), the Shader Toggler's shader list (FFXI's UI shaders, which keep
+3D scene into a background buffer larger than the screen), the Shader Toggler's shader list (FFXI's UI shaders, which keep
 the effects off the UI) and the fork's FFXI history fixes. On other games none of that applies, and
 dgVoodoo's licence only allows shipping it with a mod for a particular game. For other games use
 [DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) directly.
@@ -58,11 +58,14 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
     without any visible error and you get DLAA alone. `Check.cmd` refuses that combination and says what to do;
     see [Troubleshooting](#troubleshooting).
 - Your FFXI client's **3D background resolution set to 4096x4096** (or pass `-DepthFilter <size>` to match yours).
+  It must not equal your window resolution; see [Why the background resolution matters](#why-the-background-resolution-matters).
+  **Windower 4** has no background resolution setting: the installer sets it for you. See [Windower 4](#windower-4).
 
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.7\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.2.8\`.
+   On Windower 4 that is the folder holding the loader your Windower profile starts (see [Windower 4](#windower-4)).
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder. You can skip this if your `bootloader\host64\` already
    has them; a file you put in `Dependencies\` replaces a different one in `host64\` (backed up).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
@@ -99,6 +102,44 @@ regenerates `bootloader\dgVoodoo.conf` from its settings, so hand edits to that 
 installing, set its graphics output to **D3D11** (the installer refuses D3D12) and **MSAA Off**, and keep
 MSAA off: with MSAA on, the Shader Toggler can no longer keep the effects off the game's UI.
 
+## Windower 4
+
+Windower 4 works when its launcher starts the loader in this bootloader folder (the profile's executable is,
+for example, `bootloader\xiloader.exe`). Close the Windower launcher and the game, then run `Check.cmd` and
+`Install.cmd` as usual. When the bootloader folder sits inside the Windower folder it is found by itself;
+otherwise pass it: `Install.cmd -Windower "D:\Games\Windower4"`.
+
+For the profile that starts this folder's loader, the installer sets these in Windower's `settings.xml`.
+The Windower launcher writes them to the registry on every start, so they last:
+
+| Setting | Value | Why |
+|---|---|---|
+| `supersampling` | **1.6** (one you set above 1 is kept; `-SuperSampling 2.0` picks another) | Windower's background (3D) resolution is window size x supersampling. At 1.0 it equals the screen, see below |
+| `width` / `height` | your window resolution, from the registry if the profile has none | without them Windower cannot work out the 3D size |
+| `bumpmapping` | **true** | the setting the Shader Toggler list was taken on (Ashita, bump mapping on) |
+
+`ReShade.ini`'s depth filter is set to that 3D size, for example **4096x2304** at 2560x1440 (**3072x1728** at
+1920x1080). It is not square on Windower, so `-DepthFilter` is not used there. If you later change the window
+resolution or supersampling in the Windower launcher, run `Install.cmd` again so the depth filter follows.
+**Do not set supersampling back to 1** in the Windower launcher: the blinking comes back.
+
+`Restore.cmd` puts those `settings.xml` values back, except any you changed in the launcher since (it says so).
+The original `settings.xml` is also kept in the backup folder as `windower-settings.xml`.
+
+Known limits on Windower, the same as on Ashita: nameplates get the effects (FFXI draws them with the
+world's shaders), and some shadows flicker slightly.
+
+### Why the background resolution matters
+
+The Shader Toggler starts the effects on the first draw whose render target is the size of the screen. When
+FFXI's 3D background resolution is different from the screen, the 3D scene is drawn into its own buffer and
+the first screen-sized draw is the scale-down of the finished scene, after all the 3D and before the UI:
+one clean point every frame. When the two sizes are equal (Windower's default, supersampling 1.0), the 3D
+draws themselves are screen-sized. The effects then start somewhere inside the scene, at a point that moves
+with draw order. Characters and NPC body parts blink and lose shading, shadows in tunnels shake, nameplates
+move with the camera, zones load in dark, and the DLSS feed rebuilds every few seconds, which wipes its
+history. Picking other shader hashes only moves the problem.
+
 ## What the installer changes
 
 It works only inside the bootloader folder it is pointed at (by default, the bootloader the package folder sits in).
@@ -134,7 +175,9 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
   another wrapper (not dgVoodoo / ReShade), `dgVoodoo.conf` is in dgVoodoo's binary format, another neural
   consumer (RenoDX, Deep Fried Chicken) is in `host64\`, the NVIDIA DLLs are missing, or a package file fails
   its hash check. Each `NEEDED:` line in `Check.cmd` names the file and what to do.
-- **It never** downloads anything, touches drivers or launcher settings, or installs LumeniteFX or Zenteon shaders.
+- **Windower 4 only:** the profile values in [Windower 4](#windower-4), in Windower's `settings.xml`.
+- **It never** downloads anything, touches drivers or the registry, changes launcher settings other than
+  Windower's (above), or installs LumeniteFX or Zenteon shaders.
 
 ## Looks
 
@@ -165,6 +208,16 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.2.8** (installer, support tools and README; same binaries and settings as 1.2.7): **Windower 4 support.**
+  Under Windower the effects started inside the 3D scene, so characters blinked and lost shading, nameplates
+  and tunnel shadows moved with draw order, and the DLSS feed rebuilt every few seconds. The cause: Windower
+  sets FFXI's background resolution to window size x supersampling, 1.0 by default, so it equals the screen
+  (Ashita's 4096x4096 does not). `Install.cmd` now finds Windower (or takes `-Windower <folder>`), sets
+  supersampling 1.6 and bump mapping in the profile that starts this folder's loader, and sets the depth
+  filter to the resulting 3D size (4096x2304 at 2560x1440). `Restore.cmd` puts those values back.
+  `CollectLogs.cmd` adds Windower's `settings.xml`, with launch argument values (logins) redacted. Played on
+  2026-10-22 (Windower 4, LSB, RTX 4060, 2560x1440): UI clean, zones load normally, the feed built once in
+  17 minutes of play, and Generic Depth picked the 4096x2304 buffer by itself.
 - **1.2.7** (documentation only; same binaries, installer and settings as 1.2.6): adds `DISCLAIMER.md`
   (as-is, assumption of risk, limitation of liability, no affiliation) to the package and a use-at-your-own-risk
   notice at the top of the README.
@@ -317,7 +370,10 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
    launching again (the logs are rewritten on each start). It changes nothing and saves
    `FFXI-Clarity-support-<date>.zip` on your desktop: the logs and configs above, the list of files in
    `bootloader\` and `host64\` with versions, what `Check.cmd` prints, Windows/GPU/driver and recent crash
-   records. Your Windows user name and PC name are replaced with `<user>` and `<pc>`.
+   records. Your Windows user name and PC name are replaced with `<user>` and `<pc>`. On Windower 4 it also
+   saves Windower's `settings.xml` (found like `Install.cmd` does, or `CollectLogs.cmd -Windower "<folder>"`),
+   with every launch argument value replaced by `<redacted>` except `--server` and `--port`, so a login
+   in the arguments is not included.
 2. [Open an issue](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/new/choose) and attach the zip.
 
 Comments on videos and forum posts are hard to troubleshoot in: please use an issue so the logs stay together.

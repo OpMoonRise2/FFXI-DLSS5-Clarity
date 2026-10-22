@@ -286,6 +286,58 @@ try {
 } finally { Remove-Item -LiteralPath $depFile -Force }
 $global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4060'); $global:ClarityFakeSignature = 'HashMismatch'
 
+# Windower 4: the bootloader sits inside the Windower folder and a profile starts its loader. Windower's 3D size
+# is window size x supersampling; the installer must make it differ from the window and lock the depth filter to it.
+function WindowerFixture($n, $profileXml) {
+    $w = Join-Path $root $n; New-Item -ItemType Directory $w -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $w 'Windower.exe'), 'not a real exe')
+    $b = Fixture "$n\loader"
+    $xml = "<?xml version=`"1.1`" encoding=`"utf-8`"?>`r`n<settings>`r`n  <launcher>`r`n    <branch>stable</branch>`r`n  </launcher>`r`n" + ($profileXml -replace '\{LOADER\}', [Security.SecurityElement]::Escape("$b\fixture.exe").Replace('$','$$')) + "</settings>"
+    [IO.File]::WriteAllText((Join-Path $w 'settings.xml'), $xml, [Text.UTF8Encoding]::new($true))
+    @{ Windower = $w; Loader = $b; Settings = (Join-Path $w 'settings.xml') }
+}
+function WindowerXml($p) { [xml]((Get-Content -Raw $p) -replace '^\uFEFF?<\?xml[^>]*\?>', '') }
+$wf = WindowerFixture 'windower basic' "  <profile name=`"`">`r`n    <width>2560</width>`r`n    <height>1440</height>`r`n    <args>--server 127.0.0.1 --user u --pass p</args>`r`n    <executable>{LOADER}</executable>`r`n  </profile>`r`n  <profile name=`"retail`">`r`n    <width>1920</width>`r`n    <height>1080</height>`r`n  </profile>`r`n"
+$chk = (& $setup -Action Check -Target $wf.Loader) -join "`n"
+Assert ($chk -match 'Windower profile \(default\): 2560x1440, 3D drawn at 4096x2304; Install sets supersampling=1.6, bumpmapping=true' -and $chk -notmatch 'retail') 'windower: found from the parent folder, only the profile starting this loader'
+& $setup -Action Install -Target $wf.Loader | Out-Null
+$x = WindowerXml $wf.Settings
+$def = $x.settings.profile | Where-Object { $_.name -eq '' }; $ret = $x.settings.profile | Where-Object { $_.name -eq 'retail' }
+Assert ($def.supersampling -eq '1.6' -and $def.bumpmapping -eq 'true' -and !$ret.supersampling -and !$ret.bumpmapping) 'windower: supersampling and bump mapping set in the matching profile only'
+Assert ((Get-Content -Raw $wf.Settings) -match '^\uFEFF?<\?xml version="1.1"') 'windower: settings.xml keeps its own XML declaration'
+$rs = Get-Content -Raw "$($wf.Loader)\ReShade.ini"
+Assert ($rs -match 'FilterResolutionWidth=4096' -and $rs -match 'FilterResolutionHeight=2304') 'windower: depth filter follows the non-square 3D size'
+$chk = (& $setup -Action Check -Target $wf.Loader) -join "`n"
+Assert ($chk -match '3D drawn at 4096x2304; already set') 'windower: second Check reports nothing left to change'
+$bk = (Get-ChildItem $wf.Loader -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+Assert (Test-Path -LiteralPath "$bk\windower-settings.xml") 'windower: original settings.xml kept in the backup'
+& $setup -Action Restore -Target $wf.Loader -Backup $bk | Out-Null
+$def = (WindowerXml $wf.Settings).settings.profile | Where-Object { $_.name -eq '' }
+Assert (!$def.supersampling -and !$def.bumpmapping -and $def.width -eq '2560') 'windower: restore removes the values Install added'
+# A value changed in the launcher after installing is kept by Restore
+& $setup -Action Install -Target $wf.Loader | Out-Null
+$bk = (Get-ChildItem $wf.Loader -Directory -Filter 'FFXI-Clarity-backup-*' | Where-Object { Test-Path -LiteralPath "$($_.FullName)\receipt.json" } | Sort-Object CreationTime | Select-Object -Last 1).FullName
+[IO.File]::WriteAllText($wf.Settings, ((Get-Content -Raw $wf.Settings) -replace '<supersampling>1.6</supersampling>', '<supersampling>2</supersampling>'))
+$out = (& $setup -Action Restore -Target $wf.Loader -Backup $bk) -join "`n"
+$text = Get-Content -Raw $wf.Settings
+Assert ($out -match '<supersampling> was changed after installation; kept' -and $text -match '<supersampling>2</supersampling>' -and $text -notmatch 'bumpmapping') 'windower: restore keeps a value changed since, reverts the rest'
+# A user's supersampling above 1 is kept and sets the depth filter
+& $setup -Action Install -Target $wf.Loader | Out-Null
+Assert ((Get-Content -Raw "$($wf.Loader)\ReShade.ini") -match 'FilterResolutionWidth=5120' -and (Get-Content -Raw $wf.Settings) -match '<supersampling>2</supersampling>') 'windower: existing supersampling 2 kept, depth filter 5120x2880'
+# Refusals: no profile starts this loader; a profile without a window size; a wrong -Windower folder
+$wn = WindowerFixture 'windower other loader' "  <profile name=`"`">`r`n    <width>2560</width>`r`n    <height>1440</height>`r`n    <executable>pol.exe</executable>`r`n  </profile>`r`n"
+$chk = (& $setup -Action Check -Target $wn.Loader) -join "`n"
+Assert ($chk -match 'NEEDED: No Windower profile in .* starts a loader from') 'windower: no matching profile is refused with the fix'
+$refused = $false; try { & $setup -Action Install -Target $wn.Loader | Out-Null } catch { $refused = $true }
+Assert ($refused -and !(Test-Path "$($wn.Loader)\host64\winmm.dll")) 'windower: no matching profile, install writes nothing'
+$wr = WindowerFixture 'windower no size' "  <profile name=`"`">`r`n    <executable>{LOADER}</executable>`r`n  </profile>`r`n"
+$chk = (& $setup -Action Check -Target $wr.Loader) -join "`n"
+Assert ($chk -match 'NEEDED: Windower profile \(default\) has no window resolution') 'windower: profile without a window size (none in the registry either) is refused'
+$chk = (& $setup -Action Check -Target $f -Windower (Join-Path $root 'no such folder')) -join "`n"
+Assert ($chk -match 'NEEDED: -Windower ".*no such folder" is not a folder') 'windower: a missing -Windower folder is a NEEDED line, not a crash'
+$chk = (& $setup -Action Check -Target $f -Windower $f) -join "`n"
+Assert ($chk -match 'NEEDED: No Windower.exe in') 'windower: -Windower pointing at another folder is refused'
+
 Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus, ClarityFakeSignature -Scope Global
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'
