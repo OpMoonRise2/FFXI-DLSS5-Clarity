@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Target, [string]$OutDir)
+param([string]$Target, [string]$OutDir, [string]$Windower)
 # Gathers everything a problem report needs into one zip: logs, configs, the wrapper files present (with hashes
 # and versions), Check output, GPU/driver and recent crash records. Reads only; never changes the install.
 # The Windows user name (<user>) and PC name (<pc>) are replaced in every text file so the zip does not identify the reporter.
@@ -39,6 +39,28 @@ foreach($rel in $files){
     }catch{$missing.Add("$rel (unreadable: $($_.Exception.Message))")}
 }
 
+# Windower 4: its settings.xml decides the 3D (background) size, the root of most Windower reports. Found the
+# same way as Setup.ps1 (the parent folder, or -Windower). <args> often carries a login (--user / --pass), so
+# every argument value is replaced except the server's and port's.
+function RedactArgs([string]$a){
+    $t=@($a -split '\s+' | Where-Object {$_});$out=[Collections.Generic.List[string]]::new()
+    for($i=0;$i -lt $t.Count;$i++){
+        if($t[$i] -notmatch '^-'){$out.Add('<redacted>');continue}
+        $out.Add($t[$i])
+        if($i+1 -lt $t.Count -and $t[$i+1] -notmatch '^-'){$i++;$out.Add($(if($t[$i-1] -match '^--?(server|port)$'){$t[$i]}else{'<redacted>'}))}
+    }
+    return ($out -join ' ')
+}
+if(!$Windower){$up=Split-Path $root -Parent;if($up -and (Test-Path -LiteralPath (Join-Path $up 'Windower.exe'))){$Windower=$up}}
+$winSettings=$(if($Windower){Join-Path $Windower 'settings.xml'})
+if($winSettings -and (Test-Path -LiteralPath $winSettings)){
+    try{
+        $text=[regex]::Replace([IO.File]::ReadAllText($winSettings),'(?s)<args>(.*?)</args>',{param($m) '<args>'+(RedactArgs $m.Groups[1].Value)+'</args>'})
+        $dest=Join-Path $work 'files\windower\settings.xml';[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent))
+        [IO.File]::WriteAllText($dest,(Scrub $text),[Text.UTF8Encoding]::new($false))
+    }catch{$missing.Add("Windower settings.xml (unreadable: $($_.Exception.Message))")}
+}elseif($Windower){$missing.Add('Windower settings.xml')}
+
 # What is installed: every file in bootloader\ and host64\ with size, date, version and hash. Another mod's
 # wrapper or neural consumer shows up here even when no log mentions it.
 # Listed only when the target looks like a bootloader: a package extracted into Downloads or the Desktop must
@@ -60,7 +82,8 @@ if($isBootloader){
 
 # Check output (the same text Check.cmd prints), including a refusal or a damaged package
 $setup=Join-Path $PSScriptRoot 'Setup.ps1'
-$check=try{& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $setup -Action Check -Target $root 2>&1 | Out-String}catch{"Check failed to run: $($_.Exception.Message)"}
+$checkArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$setup,'-Action','Check','-Target',$root);if($Windower){$checkArgs+='-Windower',$Windower}
+$check=try{& powershell.exe @checkArgs 2>&1 | Out-String}catch{"Check failed to run: $($_.Exception.Message)"}
 Save 'check.txt' $check
 
 # System: Windows, GPU and driver, display, running game processes
@@ -69,6 +92,7 @@ $sys=[Text.StringBuilder]::new()
 [void]$sys.AppendLine("Package: $(Split-Path $PSScriptRoot -Leaf)")
 try{$m=Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') | ConvertFrom-Json;[void]$sys.AppendLine("Package version: $($m.Version)")}catch{}
 [void]$sys.AppendLine("Bootloader: $(Scrub $root)")
+if($Windower){[void]$sys.AppendLine("Windower: $(Scrub $Windower)")}
 try{$os=Get-CimInstance Win32_OperatingSystem;[void]$sys.AppendLine("Windows: $($os.Caption) $($os.Version) build $($os.BuildNumber)")}catch{}
 try{$cpu=Get-CimInstance Win32_Processor | Select-Object -First 1;[void]$sys.AppendLine("CPU: $($cpu.Name.Trim())")}catch{}
 try{[void]$sys.AppendLine("RAM: $([math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB)) GB")}catch{}
