@@ -1,7 +1,7 @@
 # FFXI-DLSS5-Clarity
 
 DLSS DLAA + DLSS 5 neural rendering for **Final Fantasy XI**, packaged for the loaders people
-actually use (Ashita, HorizonXI, Phoenix, Windower 4, retail-style bootloaders), without blurring when the camera moves.
+actually use (Ashita, HorizonXI, Phoenix, Windower 4, retail PlayOnline / Steam), without blurring when the camera moves.
 
 > **Use at your own risk.** Free, unofficial community mod, provided **as is, with no warranty**. The author is
 > **not liable** for any damage or loss from using it (see [DISCLAIMER.md](DISCLAIMER.md) and [LICENSE](LICENSE)).
@@ -64,9 +64,11 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.3.0\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.3.1\`.
    On Windower 4 that is the folder your Windower profile starts the game from: the folder holding its loader
    on a private server, or the PlayOnline folder holding `pol.exe` on retail (see [Windower 4](#windower-4)).
+   On retail started from PlayOnline or Steam, it is the PlayOnline folder holding `pol.exe` (see
+   [Retail](#retail-playonline--steam)).
 2. Put the two NVIDIA DLLs in its `Dependencies\` folder. You can skip this if your `bootloader\host64\` already
    has them; a file you put in `Dependencies\` replaces a different one in `host64\` (backed up).
 3. Run `Check.cmd`, then `Install.cmd`. Every file it replaces is backed up; `Restore.cmd` undoes it.
@@ -103,6 +105,44 @@ regenerates `bootloader\dgVoodoo.conf` from its settings, so hand edits to that 
 installing, set its graphics output to **D3D11** (the installer refuses D3D12) and **MSAA Off**, and keep
 MSAA off: with MSAA on, the Shader Toggler can no longer keep the effects off the game's UI.
 
+## Retail (PlayOnline / Steam)
+
+Retail works when started straight from PlayOnline or Steam (played on Steam retail, 2026-10-22). Square Enix's
+terms for the official servers prohibit third-party tools that modify the client: see the notice at the top.
+
+1. Close FFXI and PlayOnline. Extract the package into the PlayOnline folder that holds `pol.exe`, for example
+   `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.1\` or, on Steam,
+   `...\steamapps\common\FFXINA\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.1\`.
+2. Run `Check.cmd`, then `Install.cmd`, as in [Install](#install). It recognises the PlayOnline folder (from
+   the registry, or the `FINAL FANTASY XI` folder beside it) and says so.
+
+What is different from a loader install:
+
+- **Two folders.** PlayOnline runs the game inside `pol.exe`, but the game loads Direct3D 8 from the
+  `FINAL FANTASY XI` folder, not from beside `pol.exe`. The installer also puts dgVoodoo's `d3d8.dll` and the
+  same `dgVoodoo.conf` there (backed up; `Restore.cmd` takes them out again). ReShade, the add-ons and
+  `host64\` stay beside `pol.exe`. Without the copy in the game folder the game runs on Windows' own
+  Direct3D 8 and ReShade never sees it.
+- **No ReShade in the PlayOnline menus.** A DirectDraw wrapper beside `pol.exe` (dgVoodoo's `DDraw.dll` and
+  `D3DImm.dll`, often left over from another mod) puts ReShade into the PlayOnline menus, and `pol.exe` then
+  crashes when PlayOnline starts FFXI. `Check.cmd` refuses it: move those two files out. ReShade and the
+  "DLSS 5 Feed host" window then appear when the game window opens, not before.
+- **Nothing else in the game folder.** Another graphics mod's `d3d9.dll` (DXVK), `dxgi.dll` (ReShade),
+  `version.dll` (DLSS Enabler), `d3d11.dll` or `dinput8.dll` in `FINAL FANTASY XI` is refused: move it out.
+- **Depth filter from the registry.** The depth filter is set to FFXI's background resolution in the registry
+  (4096x4096 played on). The current FINAL FANTASY XI Config tool writes that value from its own graphics
+  settings every time you save (often 3840x2160 or 4096x2304), so run `Install.cmd` again after changing
+  settings there. The background must be larger than the window, see
+  [Why the background resolution matters](#why-the-background-resolution-matters). To set 4096x4096 yourself,
+  close the Config tool and run in an administrator command prompt:
+  ```
+  reg add "HKLM\SOFTWARE\WOW6432Node\PlayOnlineUS\SquareEnix\FinalFantasyXI" /v 0003 /t REG_DWORD /d 4096 /f
+  reg add "HKLM\SOFTWARE\WOW6432Node\PlayOnlineUS\SquareEnix\FinalFantasyXI" /v 0004 /t REG_DWORD /d 4096 /f
+  ```
+  (`PlayOnlineEU` / `PlayOnline` on European and Japanese clients.) `-DepthFilter <size>` overrides it.
+
+Windower on retail: see [Windower 4](#windower-4); the game-folder copy above is made there too.
+
 ## Windower 4
 
 Windower 4 works on private servers and on retail. Close the Windower launcher and the game first.
@@ -112,7 +152,7 @@ Windower 4 works on private servers and on retail. Close the Windower launcher a
   Windower folder it is found by itself: run `Check.cmd` and `Install.cmd` as usual. Otherwise pass Windower's
   folder: `Install.cmd -Windower "D:\Games\Windower4"`.
 - **Retail:** your profile starts `pol.exe`, so extract the package into the PlayOnline folder that holds it
-  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.0\`)
+  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.1\`)
   and pass Windower's folder: `Check.cmd -Windower "C:\Windower4"`, then `Install.cmd -Windower "C:\Windower4"`.
   The installer finds `pol.exe` the way Windower does (beside Windower, then PlayOnline's install folder).
 
@@ -169,7 +209,8 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
     `ResetDlaaHistory=true` and DLSS-NR `Enabled=true` are set in it.
   - `host64\ReShade.ini`: only if missing.
   - `ReShade.ini`: adds the `ffxi-clarity-shaders` search paths (only its VORT folder when your
-    `reshade-shaders\` already holds the feeder effect, so ReShade never sees two `DLSS5_Feed.fx`), the depth
+    `reshade-shaders\` already holds the feeder effect, so ReShade never sees two `DLSS5_Feed.fx`, and only its
+    textures when VORT is there too, so ReShade never sees two VORTs), the depth
     filter unless you already set one, and `RESHADE_DEPTH_INPUT_IS_REVERSED=0` (with upside-down and
     logarithmic at 0) unless the orientation is already decided there: FFXI's depth is not reversed, and
     ReShade assumes reversed when nothing says otherwise. If there is none, it writes a minimal one (F5
@@ -183,6 +224,10 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
   consumer (RenoDX, Deep Fried Chicken) is in `host64\`, the NVIDIA DLLs are missing, or a package file fails
   its hash check. Each `NEEDED:` line in `Check.cmd` names the file and what to do.
 - **Windower 4 only:** the profile values in [Windower 4](#windower-4), in Windower's `settings.xml`.
+- **Retail PlayOnline only:** `d3d8.dll` and `dgVoodoo.conf` in the `FINAL FANTASY XI` folder too (backed up
+  under `game\` in the backup folder), and the depth filter from the registry's background resolution. It
+  refuses a DirectDraw wrapper beside `pol.exe` and other graphics wrappers in the game folder. See
+  [Retail](#retail-playonline--steam).
 - **It never** downloads anything, touches drivers or the registry, changes launcher settings other than
   Windower's (above), or installs LumeniteFX or Zenteon shaders.
 
@@ -215,6 +260,20 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.3.1** (installer, tests and README; same binaries and settings as 1.3.0): **retail PlayOnline / Steam.**
+  Started from PlayOnline or Steam without a loader, retail either crashed right after "Play Online" or ran
+  without ReShade. Found on Steam retail on 2026-10-22, and played there after the fix:
+  - The game loads Direct3D 8 from the `FINAL FANTASY XI` folder, not from beside `pol.exe`, so with dgVoodoo
+    only beside `pol.exe` it ran on Windows' own Direct3D 8, which ReShade never sees. The installer now
+    recognises the PlayOnline folder and also puts `d3d8.dll` and `dgVoodoo.conf` in the game folder (backed up,
+    restorable).
+  - A leftover dgVoodoo `DDraw.dll` / `D3DImm.dll` beside `pol.exe` put ReShade into the PlayOnline menus. When
+    PlayOnline hands over to the game, ReShade unloads its add-ons, the Shader Toggler does not unregister, and
+    `pol.exe` crashes in `ntdll.dll` (`0xc0000005`). Refused now, as are other graphics wrappers in the game folder.
+  - The depth filter follows the background resolution in the registry, which the current FINAL FANTASY XI
+    Config tool rewrites on every save.
+  - An older VORT already in `reshade-shaders\` is used as it is; adding Clarity's VORT beside it made both
+    fail with `X3067 ambiguous function` errors.
 - **1.3.0** (dgVoodoo update; installer, tests and README): **fixes the crash on launch on RTX 50 PCs**
   ([#11](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/11),
   [#12](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/12)). 1.2.x shipped dgVoodoo 2.87.2, which
@@ -360,6 +419,23 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
      its product name.
   3. `crashes.txt` in the `CollectLogs` zip shows Windows' crash records. `Faulting module name` names the DLL
      that crashed; include it when you report the problem.
+- **Retail: `pol.exe` closes right after "Play Online" / when FFXI starts** (`ntdll.dll`, `0xc0000005` in
+  `crashes.txt`; `ReShade.log` ends with `Add-on "Reshade Effect Shader Toggler" was not unregistered!`).
+  ReShade was running in the PlayOnline menus (a ReShade banner or the rainbow loading circle in the PlayOnline
+  window) through a DirectDraw wrapper beside `pol.exe`. Move `DDraw.dll` and `D3DImm.dll` out of the PlayOnline
+  folder; see [Retail](#retail-playonline--steam).
+- **Retail: the game runs, but ReShade and the "DLSS 5 Feed host" window never appear in it.** `ReShade.log`
+  shows the `FFXiClass` window but no swap chain after it. dgVoodoo's `d3d8.dll` is missing from the
+  `FINAL FANTASY XI` folder (installed by 1.3.0 or older only beside `pol.exe`): run 1.3.1's `Install.cmd`.
+- **Steam: `POL-1155` "Version Update Communication Error" with `R:FFXi.dll`.** Not caused by this mod: PlayOnline
+  cannot replace `FFXi.dll` / `FFXiMain.dll` while updating (`*.tmp2` copies are left beside them). Steam's
+  "Verify integrity of game files" puts back an older copy and does not help. Close PlayOnline, rename
+  `FFXi.dll` and `FFXiMain.dll` in the `FINAL FANTASY XI` folder (for example to `.old`) and start again; the
+  update then writes new ones.
+- **`ReShade.log`: `error X3067: ambiguous function` in `vort_Motion.fx` / `vort_Defs.fxh`.** Two VORTs are on
+  the effect search path: an older one in `reshade-shaders\` and Clarity's in `ffxi-clarity-shaders\`. Move the
+  older `reshade-shaders\Shaders\vort_Motion.fx` and `Includes\vort_*.fxh` aside (1.3.1 no longer adds a second
+  VORT on new installs).
 
 - **Helper log: `WARNING: OptiScaler refused the feature-18 requirements query ... builds FSR 2.1.2 in place of
   DLSS`.** Expected with this stack, on every launch; the Feeder cannot see which upscaler ran and says so in

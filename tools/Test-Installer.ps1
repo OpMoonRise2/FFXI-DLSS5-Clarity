@@ -10,7 +10,11 @@ function Get-Process { param($Name, $ErrorAction) @() }   # fixtures only: ignor
 # Global: inside Setup.ps1, $script: would mean Setup.ps1's own scope.
 $global:ClarityFakeGpus = @('NVIDIA GeForce RTX 4060'); $global:ClarityFakeRegistryGpus = @()
 function Get-CimInstance { param($ClassName, $ErrorAction) if ($global:ClarityFakeGpus -contains 'THROW') { throw 'WMI unavailable' }; $global:ClarityFakeGpus | ForEach-Object { [pscustomobject]@{ Name = $_ } } }
-function Get-ItemProperty { param($Path, $ErrorAction) if ($Path -like '*\InstallFolder') { if ($global:ClarityFakePolDir) { [pscustomobject]@{ '1000' = $global:ClarityFakePolDir } }; return }; $global:ClarityFakeRegistryGpus | ForEach-Object { [pscustomobject]@{ DriverDesc = $_ } } }
+function Get-ItemProperty { param($Path, $ErrorAction)
+    if ($Path -like '*\InstallFolder') { if ($global:ClarityFakePolDir) { [pscustomobject]@{ '1000' = $global:ClarityFakePolDir; '0001' = $global:ClarityFakeGameDir } }; return }
+    # FFXI's own key (window 0001/0002, background 0003/0004): only what a test sets, never this PC's values.
+    if ($Path -like '*\FinalFantasyXI') { if ($global:ClarityFakeFfxiReg) { [pscustomobject]$global:ClarityFakeFfxiReg }; return }
+    $global:ClarityFakeRegistryGpus | ForEach-Object { [pscustomobject]@{ DriverDesc = $_ } } }
 # Fixtures only: the signature status of an nvngx_dlssnr.dll that is not recognised by hash (Valid = NVIDIA's original,
 # HashMismatch = a modified build). THROW stands for a session where the cmdlet cannot load.
 $global:ClarityFakeSignature = 'HashMismatch'
@@ -344,6 +348,7 @@ $rw = Join-Path $root 'retail windower'; New-Item -ItemType Directory $rw -Force
 [IO.File]::WriteAllText((Join-Path $rw 'Windower.exe'), 'not a real exe')
 [IO.File]::WriteAllText((Join-Path $rw 'settings.xml'), "<?xml version=`"1.0`" encoding=`"utf-8`"?>`r`n<settings>`r`n  <profile name=`"`">`r`n    <width>1920</width>`r`n    <height>1080</height>`r`n  </profile>`r`n</settings>")
 $pol = Fixture 'retail\PlayOnlineViewer'; [IO.File]::WriteAllText((Join-Path $pol 'pol.exe'), 'not a real exe')
+New-Item -ItemType Directory (Join-Path $root 'retail\FINAL FANTASY XI') -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $root 'retail\FINAL FANTASY XI\FFXiMain.dll'), 'not a real dll')
 $global:ClarityFakePolDir = $pol
 try {
     $chk = (& $setup -Action Check -Target $pol -Windower $rw) -join "`n"
@@ -352,7 +357,73 @@ try {
     Assert ((Get-Content -Raw (Join-Path $rw 'settings.xml')) -match '<supersampling>1.6</supersampling>' -and (Get-Content -Raw "$pol\ReShade.ini") -match 'FilterResolutionWidth=3072' -and (Get-Content -Raw "$pol\ReShade.ini") -match 'FilterResolutionHeight=1728') 'windower retail: supersampling set, depth filter 3072x1728'
     $chk = (& $setup -Action Check -Target $pol) -join "`n"
     Assert ($chk -notmatch 'Windower') 'windower retail: without -Windower nothing is assumed'
+    Assert (Test-Path (Join-Path $root 'retail\FINAL FANTASY XI\d3d8.dll')) 'windower retail: dgVoodoo also in the game folder'
 } finally { $global:ClarityFakePolDir = $null }
+
+# Retail PlayOnline / Steam without a loader (played on Steam retail 2026-10-22). pol.exe runs the game, but FFXiMain.dll
+# resolves d3d8.dll in the FINAL FANTASY XI folder: dgVoodoo and its config must be there too, and a DirectDraw
+# wrapper beside pol.exe (ReShade in the PlayOnline menus, crash at the hand-over) is refused.
+function RetailFixture($n) {
+    $p = Fixture "$n\PlayOnlineViewer"; [IO.File]::WriteAllText((Join-Path $p 'pol.exe'), 'not a real exe')
+    $g = Join-Path $root "$n\FINAL FANTASY XI"; New-Item -ItemType Directory $g -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $g 'FFXiMain.dll'), 'not a real dll')
+    @{ Pol = $p; Game = $g }
+}
+$rp = RetailFixture 'retail plain'
+$global:ClarityFakePolDir = $rp.Pol; $global:ClarityFakeGameDir = $rp.Game
+$global:ClarityFakeFfxiReg = @{ '0001' = 2560; '0002' = 1440; '0003' = 3840; '0004' = 2160 }
+try {
+    $chk = (& $setup -Action Check -Target $rp.Pol) -join "`n"
+    Assert ($chk -match 'Retail PlayOnline: FFXI loads Direct3D 8 from .*FINAL FANTASY XI' -and $chk -match 'depth filter: Install sets 3840x2160' -and $chk -notmatch 'NEEDED|WARNING') 'retail: detected from the registry, game folder and background size announced'
+    & $setup -Action Install -Target $rp.Pol | Out-Null
+    Assert ((Hash "$($rp.Game)\d3d8.dll") -eq (Hash (Join-Path $Package 'payload\d3d8.dll')) -and (Hash "$($rp.Pol)\d3d8.dll") -eq (Hash (Join-Path $Package 'payload\d3d8.dll'))) 'retail: dgVoodoo beside pol.exe and in the game folder'
+    Assert ((Get-Content -Raw "$($rp.Game)\dgVoodoo.conf") -eq (Get-Content -Raw "$($rp.Pol)\dgVoodoo.conf") -and (Get-Content -Raw "$($rp.Game)\dgVoodoo.conf") -match 'OutputAPI=d3d11_fl11_0') 'retail: same D3D11 dgVoodoo.conf in the game folder'
+    $rs = Get-Content -Raw "$($rp.Pol)\ReShade.ini"
+    Assert ($rs -match 'FilterResolutionWidth=3840' -and $rs -match 'FilterResolutionHeight=2160') 'retail: depth filter follows the registry background size'
+    $bk = (Get-ChildItem $rp.Pol -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+    & $setup -Action Restore -Target $rp.Pol -Backup $bk | Out-Null
+    Assert (!(Test-Path "$($rp.Game)\d3d8.dll") -and !(Test-Path "$($rp.Game)\dgVoodoo.conf") -and (Test-Path "$($rp.Game)\FFXiMain.dll")) 'retail: restore takes dgVoodoo out of the game folder, game files untouched'
+    # Found without the registry too: FINAL FANTASY XI beside the PlayOnline folder (Steam layout)
+    $global:ClarityFakePolDir = $null
+    Assert (((& $setup -Action Check -Target $rp.Pol) -join "`n") -match 'Retail PlayOnline: FFXI loads Direct3D 8 from') 'retail: sibling FINAL FANTASY XI folder found without the registry'
+    $global:ClarityFakePolDir = $rp.Pol
+    # Another dgVoodoo build in the game folder is replaced with a backup, and Restore puts it back
+    $rd = RetailFixture 'retail other dgvoodoo'; $global:ClarityFakePolDir = $rd.Pol; $global:ClarityFakeGameDir = $rd.Game
+    [IO.File]::WriteAllBytes("$($rd.Game)\d3d8.dll", [IO.File]::ReadAllBytes((Join-Path $Package 'payload\d3d8.dll')) + [byte[]](1,2,3)); $before = Hash "$($rd.Game)\d3d8.dll"
+    Assert (((& $setup -Action Check -Target $rd.Pol) -join "`n") -match 'd3d8.dll in .*FINAL FANTASY XI is dgVoodoo .*Install replaces it') 'retail: other dgVoodoo in the game folder announced'
+    & $setup -Action Install -Target $rd.Pol | Out-Null
+    $bk = (Get-ChildItem $rd.Pol -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+    Assert ((Hash "$bk\game\d3d8.dll") -eq $before) 'retail: game-folder d3d8.dll backed up under game\'
+    & $setup -Action Restore -Target $rd.Pol -Backup $bk | Out-Null
+    Assert ((Hash "$($rd.Game)\d3d8.dll") -eq $before) 'retail: restore puts the game-folder d3d8.dll back'
+    # Refusals, no writes: dgVoodoo's DirectDraw beside pol.exe; another wrapper in the game folder
+    $rw2 = RetailFixture 'retail ddraw'; $global:ClarityFakePolDir = $rw2.Pol; $global:ClarityFakeGameDir = $rw2.Game
+    Copy-Item (Join-Path $Package 'payload\d3d8.dll') "$($rw2.Pol)\DDraw.dll"; Copy-Item (Join-Path $Package 'payload\d3d8.dll') "$($rw2.Pol)\D3DImm.dll"
+    $chk = (& $setup -Action Check -Target $rw2.Pol) -join "`n"
+    Assert ($chk -match 'NEEDED: DDraw.dll and D3DImm.dll beside pol.exe are DirectDraw wrapper code.*crashes when PlayOnline starts FFXI.*Move DDraw.dll and D3DImm.dll out') 'retail: DirectDraw wrapper beside pol.exe refused, naming the crash and the fix'
+    $refused = $false; try { & $setup -Action Install -Target $rw2.Pol | Out-Null } catch { $refused = $true }
+    Assert ($refused -and !(Test-Path "$($rw2.Pol)\host64\winmm.dll") -and !(Test-Path "$($rw2.Game)\d3d8.dll")) 'retail: DirectDraw wrapper, install writes nothing'
+    $rw3 = RetailFixture 'retail dxvk'; $global:ClarityFakePolDir = $rw3.Pol; $global:ClarityFakeGameDir = $rw3.Game
+    [IO.File]::WriteAllText("$($rw3.Game)\d3d9.dll", 'x')
+    Assert (((& $setup -Action Check -Target $rw3.Pol) -join "`n") -match 'NEEDED: d3d9.dll in .*FINAL FANTASY XI belongs to another graphics mod') 'retail: other wrapper in the game folder refused'
+    # Background equal to the window: warned, not refused; an explicit -DepthFilter wins over the registry
+    $global:ClarityFakePolDir = $rp.Pol; $global:ClarityFakeGameDir = $rp.Game
+    $global:ClarityFakeFfxiReg = @{ '0001' = 2560; '0002' = 1440; '0003' = 2560; '0004' = 1440 }
+    $chk = (& $setup -Action Check -Target $rp.Pol) -join "`n"
+    Assert ($chk -match 'WARNING: FFXI''s background resolution equals the window size' -and $chk -notmatch 'NEEDED') 'retail: background equal to the window warned'
+    & $setup -Action Install -Target $rp.Pol -DepthFilter 4096 | Out-Null
+    Assert ((Get-Content -Raw "$($rp.Pol)\ReShade.ini") -match 'FilterResolutionHeight=4096') 'retail: explicit -DepthFilter wins over the registry'
+} finally { $global:ClarityFakePolDir = $null; $global:ClarityFakeGameDir = $null; $global:ClarityFakeFfxiReg = $null }
+
+# An older VORT already in the reused reshade-shaders\ root: Clarity's VORT is not put on the search path as well
+# (two copies make every VORT include ambiguous, X3067, and one fails to compile on each start).
+$vo = Fixture 'old vort'
+New-Item -ItemType Directory "$vo\reshade-shaders\Shaders" -Force | Out-Null
+Copy-Item $feedFx "$vo\reshade-shaders\Shaders\DLSS5_Feed.fx"; [IO.File]::WriteAllText("$vo\reshade-shaders\Shaders\vort_Motion.fx", '// older VORT')
+[IO.File]::WriteAllText("$vo\ReShade.ini", "[GENERAL]`r`nEffectSearchPaths=.\reshade-shaders\Shaders\**`r`nTextureSearchPaths=.\reshade-shaders\Textures\**`r`n")
+Assert (((& $setup -Action Check -Target $vo) -join "`n") -match 'DLSS5_Feed.fx and VORT: it stays the effect root, and only textures are added') 'old VORT: Check says the existing VORT is used'
+& $setup -Action Install -Target $vo | Out-Null
+$rs = Get-Content -Raw "$vo\ReShade.ini"
+Assert ($rs.Contains('EffectSearchPaths=.\reshade-shaders\Shaders\**' + "`r`n") -and $rs.Contains('TextureSearchPaths=.\reshade-shaders\Textures\**,.\ffxi-clarity-shaders\Textures\**')) 'old VORT: no second VORT on the effect path, textures added'
 
 # dgVoodoo 2.87.2 (1.2.x's build) crashes on some RTX 50 PCs: it is replaced with its own message, and restorable
 if ($OldD3d8) {
@@ -366,6 +437,6 @@ if ($OldD3d8) {
     Assert ((Hash "$o2\d3d8.dll") -eq $old) 'dgVoodoo 2.87.2: restore puts it back'
 } else { 'SKIP: dgVoodoo 2.87.2 upgrade (pass -OldD3d8)' }
 
-Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus, ClarityFakeSignature, ClarityFakePolDir -Scope Global
+Remove-Variable ClarityFakeGpus, ClarityFakeRegistryGpus, ClarityFakeSignature, ClarityFakePolDir, ClarityFakeGameDir, ClarityFakeFfxiReg -Scope Global
 Remove-Item $root -Recurse -Force
 'All installer tests passed.'
