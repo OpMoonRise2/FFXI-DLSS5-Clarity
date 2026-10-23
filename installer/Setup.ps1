@@ -50,8 +50,12 @@ if($Action -eq 'Restore'){
     $receipt=Get-Content -Raw -LiteralPath (Join-Path $Backup 'receipt.json') | ConvertFrom-Json
     if($receipt.Target -ne $root){throw 'Backup belongs to another folder.'}
     foreach($e in $receipt.Files){$p=SafePath $root $e.Path;if(!(Test-Path -LiteralPath $p) -or (Hash $p) -ne $e.After){throw "Changed since installation; restore stopped without writes: $($e.Path)"};if($e.Before -and (Hash (SafePath $Backup $e.Path)) -ne $e.Before){throw 'Backup hash mismatch.'}}
+    # Retail game-folder files: plain names only, checked like the rest before anything is written.
+    $gameFiles=@();if($receipt.Game){$gameFiles=@($receipt.Game.Files)}
+    foreach($e in $gameFiles){if($e.Path -match '[\\/:]'){throw 'Unexpected game-folder path in receipt.'};$p=Join-Path $receipt.Game.Dir $e.Path;if(!(Test-Path -LiteralPath $p) -or (Hash $p) -ne $e.After){throw "Changed since installation; restore stopped without writes: $p"};if($e.Before -and (Hash (SafePath $Backup "game\$($e.Path)")) -ne $e.Before){throw 'Backup hash mismatch.'}}
     $retired=Join-Path $root ('FFXI-Clarity-removed-'+[guid]::NewGuid().ToString('N'))
     foreach($e in $receipt.Files){$p=SafePath $root $e.Path;if($e.Before){Copy-Item -LiteralPath (SafePath $Backup $e.Path) -Destination $p -Force}else{$dest=SafePath $retired $e.Path;[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent));Move-Item -LiteralPath $p -Destination $dest}}
+    foreach($e in $gameFiles){$p=Join-Path $receipt.Game.Dir $e.Path;if($e.Before){Copy-Item -LiteralPath (SafePath $Backup "game\$($e.Path)") -Destination $p -Force}else{$dest=SafePath $retired "game\$($e.Path)";[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent));Move-Item -LiteralPath $p -Destination $dest}}
     Write-Output "Restored original files. Newly added files were retained in $retired"
     # Windower rewrites settings.xml whenever its launcher saves, so a whole-file hash would block every restore.
     # Only the elements Install set are put back, and only while they still hold the value Install wrote.
@@ -98,12 +102,15 @@ if(!$SkipGpuCheck){
 # replaced (backed up, restorable). VORT and the package's own ffxi-clarity-shaders\ copy are installed
 # beside it and are never required inside reshade-shaders\ (1.2.0 demanded all 23 files there and refused
 # the very setup this package was tuned on).
-$reuseShaders=$false;$staleFeed=$false
+$reuseShaders=$false;$staleFeed=$false;$oldVort=$false
 $existingFeed=SafePath $root 'reshade-shaders\Shaders\DLSS5_Feed.fx'
 $feedEntry='payload\ffxi-clarity-shaders\Shaders\DLSS5_Feed.fx'
 if(Test-Path -LiteralPath $existingFeed){
     $reuseShaders=$true
     if((Hash $existingFeed) -ne $manifest.Files.$feedEntry){$staleFeed=$true}
+    # A VORT already in that root is used as it is: a second VORT on the search path makes both copies'
+    # includes ambiguous (X3067 'PostProcessVS', 'SRGBToLin'), and the older copy fails to compile on every start.
+    $oldVort=Test-Path -LiteralPath (SafePath $root 'reshade-shaders\Shaders\vort_Motion.fx')
 }
 $runtime=@{};$runtimeNotes=[Collections.Generic.List[string]]::new()
 # The neural forwarder ships in payload (GPL, the tested 2026-09-20 build; see tools\known-good.json); NVIDIA's two runtimes are user-supplied.
@@ -248,6 +255,49 @@ if($Windower){
         }
     }
 }
+# Retail (PlayOnline / Steam; played on Steam retail 2026-10-22): Square Enix's pol.exe runs the game in its own
+# process, but FFXiMain.dll is loaded from the FINAL FANTASY XI folder and its d3d8.dll import is resolved there,
+# not beside pol.exe. With dgVoodoo beside pol.exe only, the game got Windows' Direct3D 8, which ReShade never
+# sees. d3d8.dll and dgVoodoo.conf therefore also go into the game folder (beside pol.exe they still serve loaders
+# that load d3d8.dll early). A DirectDraw wrapper beside pol.exe (dgVoodoo DDraw.dll / D3DImm.dll) puts ReShade
+# into the PlayOnline menus; when PlayOnline hands over to the game its device closes, ReShade unloads the
+# add-ons, the Shader Toggler does not unregister and pol.exe crashes in ntdll.dll. That wrapper is refused, and
+# so are other graphics wrappers in the game folder.
+$retail=$null
+if(Test-Path -LiteralPath (Join-Path $root 'pol.exe')){
+    $game=$null;$fromReg=$false
+    foreach($k in 'PlayOnlineUS','PlayOnlineEU','PlayOnline'){
+        $f=Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\$k\InstallFolder" -ErrorAction SilentlyContinue
+        if($f -and $f.'1000' -and [IO.Path]::GetFullPath($f.'1000').TrimEnd('\') -eq $root.TrimEnd('\')){$fromReg=$true;if($f.'0001'){$game=[IO.Path]::GetFullPath($f.'0001')};break}
+    }
+    if(!$game -or !(Test-Path -LiteralPath (Join-Path $game 'FFXiMain.dll'))){$game=Join-Path (Split-Path $root -Parent) 'FINAL FANTASY XI'}
+    if(Test-Path -LiteralPath (Join-Path $game 'FFXiMain.dll')){$retail=@{Game=(Resolve-Path -LiteralPath $game).Path}}
+    elseif($fromReg){$problems.Add("$root is PlayOnline's install folder, but the FINAL FANTASY XI folder (FFXiMain.dll) was not found beside it or in the registry. Start FFXI from PlayOnline once so it finishes updating, then run Check.cmd again.")}
+}
+if($retail){
+    $isWindows={param($p) (Get-Item -LiteralPath $p).VersionInfo.ProductName -match 'Microsoft'}
+    $ddraw=@('DDraw.dll','D3DImm.dll' | Where-Object {(Test-Path -LiteralPath (Join-Path $root $_)) -and !(& $isWindows (Join-Path $root $_))})
+    if($ddraw.Count){$problems.Add("$($ddraw -join ' and ') beside pol.exe $(if($ddraw.Count -gt 1){'are'}else{'is'}) DirectDraw wrapper code (for example dgVoodoo's). It puts ReShade into the PlayOnline menus, and pol.exe then crashes when PlayOnline starts FFXI. Move $($ddraw -join ' and ') out of $root (keep them to switch back), then run Check.cmd again.")}
+    foreach($n in 'd3d9.dll','dxgi.dll','d3d11.dll','version.dll','dinput8.dll'){
+        $p=Join-Path $retail.Game $n
+        if((Test-Path -LiteralPath $p) -and !(& $isWindows $p)){$problems.Add("$n in $($retail.Game) belongs to another graphics mod (for example DXVK, ReShade or DLSS Enabler) and takes over FFXI's rendering there. Move it out of that folder (keep it to switch back), then run Check.cmd again.")}
+    }
+    $gd=Join-Path $retail.Game 'd3d8.dll'
+    if(Test-Path -LiteralPath $gd){
+        $h=Hash $gd
+        if($h -ne $manifest.Files.'payload\d3d8.dll' -and $h -notin $knownD3d8){
+            if($h -in $crashingD3d8){$replacedWrappers.Add("Existing d3d8.dll in $($retail.Game) is dgVoodoo 2.87.2 (shipped by Clarity 1.2.x), which crashes on start-up on some RTX 50 PCs: Install replaces it with dgVoodoo 2.87.5 (backed up; Restore.cmd puts it back).")}
+            elseif((Get-Item -LiteralPath $gd).VersionInfo.ProductName -eq 'dgVoodoo'){$replacedWrappers.Add("Existing d3d8.dll in $($retail.Game) is dgVoodoo $((Get-Item -LiteralPath $gd).VersionInfo.ProductVersion), not the tested build: Install replaces it with the tested one (backed up; Restore.cmd puts it back).")}
+            else{$problems.Add("d3d8.dll in $($retail.Game) is not dgVoodoo, so it belongs to another graphics wrapper or mod and is never overwritten. Move it out of that folder (keep a copy to switch back), then run Check.cmd again.")}
+        }
+    }
+    # FFXI draws its 3D scene at the background resolution in the registry. The FINAL FANTASY XI Config tool writes
+    # it from its own settings on every save (not always 4096x4096), so the depth filter follows the registry.
+    foreach($k in 'PlayOnlineUS','PlayOnline','PlayOnlineEU'){
+        $r=Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\$k\SquareEnix\FinalFantasyXI" -ErrorAction SilentlyContinue
+        if($r -and [int]$r.'0003' -gt 0 -and [int]$r.'0004' -gt 0){$retail.BgW=[int]$r.'0003';$retail.BgH=[int]$r.'0004';$retail.W=[int]$r.'0001';$retail.H=[int]$r.'0002';break}
+    }
+}
 Write-Output "FFXI Clarity portable preflight: $root"
 if($gpuNote){Write-Output "WARNING: $gpuNote"}
 if($problems.Count){$problems | ForEach-Object {Write-Output "NEEDED: $_"};Write-Output 'Nothing was changed. Fix the NEEDED lines above and run Check.cmd again.';if($Action -eq 'Install'){throw 'No installation files changed.'};return}
@@ -260,10 +310,18 @@ if($win){
     }
     Write-Output "ReShade.ini depth filter: Install sets $($win.Profiles[0].BgW)x$($win.Profiles[0].BgH) to match the Windower 3D size (-DepthFilter is not used with Windower)."
 }
+if($retail){
+    Write-Output "Retail PlayOnline: FFXI loads Direct3D 8 from $($retail.Game). Install also puts dgVoodoo's d3d8.dll and dgVoodoo.conf there (backed up; Restore.cmd takes them out again)."
+    if(!$win -and !$PSBoundParameters.ContainsKey('DepthFilter') -and $retail.BgW){
+        Write-Output "ReShade.ini depth filter: Install sets $($retail.BgW)x$($retail.BgH), FFXI's background resolution in the registry. If you change it later (FINAL FANTASY XI Config rewrites it on every save), run Install.cmd again."
+        if($retail.BgW -eq $retail.W -and $retail.BgH -eq $retail.H){Write-Output "WARNING: FFXI's background resolution equals the window size ($($retail.W)x$($retail.H)), so the Shader Toggler cannot tell the 3D scene from the screen (blinking characters). Set a larger background resolution; see README.md, Retail."}
+    }
+}
 if($dgFixed){Write-Output 'dgVoodoo.conf is not set to Direct3D 11 feature level 11: Install sets OutputAPI = d3d11_fl11_0 (backed up). Phoenix launcher rewrites this file every launch: set its graphics output to D3D11 there too.'}
 Write-Output 'File prerequisites passed. GPU, driver and live rendering still require the host test and gameplay check.'
 if($reuseShaders){
     if($staleFeed){Write-Output 'Existing reshade-shaders\Shaders\DLSS5_Feed.fx is from another Feeder release: Install replaces it (backed up) so it matches the shipped dlss5-feed.addon32.'}
+    elseif($oldVort){Write-Output 'Existing reshade-shaders\ already has this release''s DLSS5_Feed.fx and VORT: it stays the effect root, and only textures are added from ffxi-clarity-shaders\ (a second VORT on the search path fails to compile).'}
     else{Write-Output 'Existing reshade-shaders\ already has this release''s DLSS5_Feed.fx: it stays the effect root; VORT is added from ffxi-clarity-shaders\.'}
 }
 $rsPeek=ReadText (SafePath $root 'ReShade.ini')
@@ -310,9 +368,9 @@ if($rs){
     # Keep existing presets intact. The user selects our separate preset for the first run.
     # With an existing reshade-shaders\ as the effect root, only VORT (and the textures) are added from
     # ffxi-clarity-shaders\: adding its whole Shaders\** too would hand ReShade two DLSS5_Feed.fx.
-    if($reuseShaders){$fxPath='.\ffxi-clarity-shaders\Shaders\vort_Shaders\**'}else{$fxPath='.\ffxi-clarity-shaders\Shaders\**'}
+    if($oldVort){$fxPath=$null}elseif($reuseShaders){$fxPath='.\ffxi-clarity-shaders\Shaders\vort_Shaders\**'}else{$fxPath='.\ffxi-clarity-shaders\Shaders\**'}
     if($rs -match '(?im)^EffectSearchPaths=(.*)$'){$paths=$Matches[1].Trim()}else{$paths=''}
-    if($paths -notlike '*ffxi-clarity-shaders*'){$rs=SetIni $rs 'GENERAL' 'EffectSearchPaths' ($paths+','+$fxPath).Trim(',')}
+    if($fxPath -and $paths -notlike '*ffxi-clarity-shaders*'){$rs=SetIni $rs 'GENERAL' 'EffectSearchPaths' ($paths+','+$fxPath).Trim(',')}
     if($rs -match '(?im)^TextureSearchPaths=(.*)$'){$paths=$Matches[1].Trim()}else{$paths=''}
     if($paths -notlike '*ffxi-clarity-shaders*'){$rs=SetIni $rs 'GENERAL' 'TextureSearchPaths' ($paths+',.\ffxi-clarity-shaders\Textures\**').Trim(',')}
     # FFXI's depth (dgVoodoo, Direct3D 8 projection) is not reversed; ReShade assumes reversed when nothing
@@ -334,6 +392,11 @@ if($win){
     $rs=SetIni $rs 'DEPTH' 'FilterResolutionWidth' "$($win.Profiles[0].BgW)"
     $rs=SetIni $rs 'DEPTH' 'FilterResolutionHeight' "$($win.Profiles[0].BgH)"
     $rs=SetIni $rs 'DEPTH' 'UseAspectRatioHeuristics' '4'
+}elseif($retail -and $retail.BgW -and !$PSBoundParameters.ContainsKey('DepthFilter')){
+    # Retail: the background resolution from the registry, which the FFXI Config tool rewrites (often not square).
+    $rs=SetIni $rs 'DEPTH' 'FilterResolutionWidth' "$($retail.BgW)"
+    $rs=SetIni $rs 'DEPTH' 'FilterResolutionHeight' "$($retail.BgH)"
+    $rs=SetIni $rs 'DEPTH' 'UseAspectRatioHeuristics' '4'
 }elseif($DepthFilter -gt 0 -and ($depthIsFresh -or $PSBoundParameters.ContainsKey('DepthFilter'))){
     $rs=SetIni $rs 'DEPTH' 'FilterResolutionWidth' "$DepthFilter"
     $rs=SetIni $rs 'DEPTH' 'FilterResolutionHeight' "$DepthFilter"
@@ -342,10 +405,22 @@ if($win){
 $changes['ReShade.ini']=@{Text=$rs}
 if($dgFixed){$changes['dgVoodoo.conf']=@{Text=$dgFixed}}
 if(!$dg){$changes['dgVoodoo.conf']=@{Text="[General]`r`nOutputAPI=d3d11_fl11_0`r`nFullScreenMode=false`r`n[DirectX]`r`nResolution=unforced`r`ndgVoodooWatermark=false`r`n"}}
+# Retail: the same dgVoodoo and configuration beside FFXiMain.dll, where the game resolves d3d8.dll.
+$gameChanges=@{}
+if($retail){
+    $gd=Join-Path $retail.Game 'd3d8.dll';$src=Join-Path $PSScriptRoot 'payload\d3d8.dll'
+    if(!(Test-Path -LiteralPath $gd) -or (Hash $gd) -ne (Hash $src)){$gameChanges['d3d8.dll']=@{Source=$src}}
+    $dgText=$(if($changes.ContainsKey('dgVoodoo.conf')){$changes['dgVoodoo.conf'].Text}else{$dg})
+    if((ReadText (Join-Path $retail.Game 'dgVoodoo.conf')) -ne $dgText){$gameChanges['dgVoodoo.conf']=@{Text=$dgText}}
+}
 $backupDir=Join-Path $root ('FFXI-Clarity-backup-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($backupDir)
 $records=[Collections.Generic.List[object]]::new()
 foreach($rel in ($changes.Keys | Sort-Object)){$p=SafePath $root $rel;$before=$null;if(Test-Path -LiteralPath $p){$before=Hash $p;$saved=SafePath $backupDir $rel;[void][IO.Directory]::CreateDirectory((Split-Path $saved -Parent));Copy-Item -LiteralPath $p -Destination $saved};$records.Add([pscustomobject]@{Path=$rel;Before=$before;After=$null})}
+# Game-folder files are kept under game\ in the backup and recorded with that folder, outside the receipt's Target.
+$gameRecords=[Collections.Generic.List[object]]::new()
+foreach($n in ($gameChanges.Keys | Sort-Object)){$p=Join-Path $retail.Game $n;$before=$null;if(Test-Path -LiteralPath $p){$before=Hash $p;$saved=SafePath $backupDir "game\$n";[void][IO.Directory]::CreateDirectory((Split-Path $saved -Parent));Copy-Item -LiteralPath $p -Destination $saved};$gameRecords.Add([pscustomobject]@{Path=$n;Before=$before;After=$null})}
+$gameRecord=$(if($gameRecords.Count){[pscustomobject]@{Dir=$retail.Game;Files=$gameRecords}}else{$null})
 # Windower's settings.xml lives outside the bootloader folder: kept whole in the backup, and recorded per element.
 $winRecord=$null
 if($win -and @($win.Profiles | Where-Object {$_.Set.Count}).Count){
@@ -354,6 +429,7 @@ if($win -and @($win.Profiles | Where-Object {$_.Set.Count}).Count){
 }
 try{
     foreach($r in $records){$p=SafePath $root $r.Path;$c=$changes[$r.Path];[void][IO.Directory]::CreateDirectory((Split-Path $p -Parent));if($c.ContainsKey('Source')){Copy-Item -LiteralPath $c.Source -Destination $p -Force;if((Hash $p) -ne (Hash $c.Source)){throw 'Copy verification failed.'}}else{WriteText $p $c.Text};$r.After=Hash $p}
+    foreach($r in $gameRecords){$p=Join-Path $retail.Game $r.Path;$c=$gameChanges[$r.Path];if($c.ContainsKey('Source')){Copy-Item -LiteralPath $c.Source -Destination $p -Force;if((Hash $p) -ne (Hash $c.Source)){throw 'Copy verification failed.'}}else{WriteText $p $c.Text};$r.After=Hash $p}
     if($winRecord){
         foreach($pr in $win.Profiles){foreach($s in $pr.Set){$el=$pr.Node.SelectSingleNode($s.Element);if(!$el){$el=$pr.Node.AppendChild($winXml.Doc.CreateElement($s.Element))};$el.InnerText=$s.After}}
         WriteWindowerXml $win.Settings $winXml
@@ -362,9 +438,10 @@ try{
     $failure=$_
     $failedFiles=Join-Path $backupDir 'failed-install-files'
     foreach($r in $records){$p=SafePath $root $r.Path;if($r.Before){Copy-Item -LiteralPath (SafePath $backupDir $r.Path) -Destination $p -Force}elseif(Test-Path -LiteralPath $p){$dest=SafePath $failedFiles $r.Path;[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent));Move-Item -LiteralPath $p -Destination $dest}}
+    foreach($r in $gameRecords){$p=Join-Path $retail.Game $r.Path;if($r.Before){Copy-Item -LiteralPath (SafePath $backupDir "game\$($r.Path)") -Destination $p -Force}elseif(Test-Path -LiteralPath $p){$dest=SafePath $failedFiles "game\$($r.Path)";[void][IO.Directory]::CreateDirectory((Split-Path $dest -Parent));Move-Item -LiteralPath $p -Destination $dest}}
     if($winRecord){Copy-Item -LiteralPath (Join-Path $backupDir 'windower-settings.xml') -Destination $win.Settings -Force}
     throw $failure
-}finally{@{Target=$root;Files=@($records.ToArray());Windower=$winRecord;Version=$manifest.Version} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $backupDir 'receipt.json') -Encoding UTF8}
+}finally{@{Target=$root;Files=@($records.ToArray());Game=$gameRecord;Windower=$winRecord;Version=$manifest.Version} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $backupDir 'receipt.json') -Encoding UTF8}
 if($winRecord){Write-Output "Windower settings.xml updated (supersampling / bump mapping). Do not lower supersampling to 1 in the Windower launcher: that brings the blinking back."}
 Write-Output "Installed. Backup: $backupDir"
 Write-Output 'Select FFXI-Clarity.ini in ReShade for the first check. Existing presets remain available. Run Test.cmd before launching FFXI.'
