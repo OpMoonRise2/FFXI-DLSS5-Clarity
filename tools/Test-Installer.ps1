@@ -182,6 +182,43 @@ $refused = $false; try { & $setup -Action Install -Target $y | Out-Null } catch 
 Assert ($refused -and !(Test-Path "$y\host64\winmm.dll")) 'other neural consumer in host64: refused, no writes'
 Assert (((& $setup -Action Check -Target $y) -join "`n") -match 'host64\\deep-fried-chicken.addon64 is another neural consumer.*Move it out of host64') 'other neural consumer: Check names the file to move'
 
+# 9b. dgVoodoo's emulated card has 256 MB when VRAM is unset; with the 4096x4096 3D buffer FFXI then crashes in crowded
+#     zones (ffximain.dll+0x43ee6, 2026-10-24). A missing or smaller VRAM is raised to 2048 (backed up); 1 GB and up is kept.
+$vf = Fixture 'vram fresh'; & $setup -Action Install -Target $vf | Out-Null
+Assert ((Get-Content -Raw "$vf\dgVoodoo.conf") -match '(?m)^VRAM=2048\r?$') 'VRAM: fresh install writes VRAM=2048'
+$vm = Fixture 'vram minimal'; [IO.File]::WriteAllText("$vm\dgVoodoo.conf", "[General]`r`nOutputAPI=d3d11_fl11_0`r`nFullScreenMode=false`r`n[DirectX]`r`nResolution=unforced`r`ndgVoodooWatermark=false`r`n")
+Assert (((& $setup -Action Check -Target $vm) -join "`n") -match "no VRAM setting, so dgVoodoo's default of 256 MB.*Install sets VRAM = 2048") 'VRAM: 1.3.1 minimal config (no VRAM line) announced'
+& $setup -Action Install -Target $vm | Out-Null
+$dgc = Get-Content -Raw "$vm\dgVoodoo.conf"
+Assert ($dgc -match '(?ms)^\[DirectX\]\r?\n.*^VRAM=2048\r?$' -and $dgc -match '(?m)^OutputAPI=d3d11_fl11_0\r?$' -and $dgc -match 'dgVoodooWatermark=false') 'VRAM: missing VRAM added under [DirectX], other keys kept'
+$v2 = Fixture 'vram 256'; [IO.File]::WriteAllText("$v2\dgVoodoo.conf", "[General]`r`nOutputAPI                            = d3d11_fl11_0`r`n`r`n[DirectX]`r`nVideoCard                           = internal3D`r`nVRAM                                = 256`r`nFiltering                           = appdriven`r`n")
+Assert (((& $setup -Action Check -Target $v2) -join "`n") -match 'gives FFXI 256 MB of video memory.*Install sets VRAM = 2048') 'VRAM: 256 MB announced'
+& $setup -Action Install -Target $v2 | Out-Null
+$dgc = Get-Content -Raw "$v2\dgVoodoo.conf"
+Assert ($dgc -match '(?m)^VRAM=2048\r?$' -and $dgc -notmatch '= 256' -and $dgc -match 'VideoCard\s+= internal3D' -and $dgc -match 'Filtering\s+= appdriven') 'VRAM: 256 raised to 2048 in place, other keys kept'
+$bk = (Get-ChildItem $v2 -Directory -Filter 'FFXI-Clarity-backup-*').FullName
+Assert ((Get-Content -Raw "$bk\dgVoodoo.conf") -match 'VRAM\s+= 256') 'VRAM: original 256 config backed up'
+& $setup -Action Restore -Target $v2 -Backup $bk | Out-Null
+Assert ((Get-Content -Raw "$v2\dgVoodoo.conf") -match 'VRAM\s+= 256') 'VRAM: restore puts the 256 config back'
+foreach ($keep in '1GB', '4096') {
+    $vk = Fixture "vram $keep"; $text = "[General]`r`nOutputAPI = d3d11_fl11_0`r`n[DirectX]`r`nVRAM                                = $keep`r`n"; [IO.File]::WriteAllText("$vk\dgVoodoo.conf", $text)
+    $chk = (& $setup -Action Check -Target $vk) -join "`n"
+    & $setup -Action Install -Target $vk | Out-Null
+    Assert ($chk -notmatch 'video memory|Install sets VRAM' -and (Get-Content -Raw "$vk\dgVoodoo.conf") -eq $text) "VRAM: $keep kept, config untouched"
+}
+
+# 9c. A launcher's own install folder (HorizonXI_Launcher, Squirrel Update.exe + app-*) never starts the game: refused, no
+#     writes. The same folder with a game loader in it, and any folder with a custom loader (fixture.exe), still installs.
+$hl = Fixture 'horizon launcher'; [IO.File]::WriteAllText("$hl\HorizonXI-Launcher.exe", 'not a real exe'); [IO.File]::WriteAllText("$hl\Update.exe", 'not a real exe'); New-Item -ItemType Directory "$hl\app-2.0.3" -Force | Out-Null
+$chk = (& $setup -Action Check -Target $hl) -join "`n"
+Assert ($chk -match "NEEDED: .* is a launcher's own install folder.*HorizonXI\\Game\\bootloader") 'launcher folder: HorizonXI launcher refused, names the bootloader folder'
+$refused = $false; try { & $setup -Action Install -Target $hl | Out-Null } catch { $refused = $true }
+Assert ($refused -and !(Test-Path "$hl\host64\winmm.dll") -and !(Get-ChildItem $hl -Directory -Filter 'FFXI-Clarity-backup-*')) 'launcher folder: install refused, no writes'
+$sq = Fixture 'squirrel launcher'; [IO.File]::WriteAllText("$sq\Update.exe", 'not a real exe'); New-Item -ItemType Directory "$sq\app-1.0.0" -Force | Out-Null
+Assert (((& $setup -Action Check -Target $sq) -join "`n") -match "NEEDED: .* is a launcher's own install folder") 'launcher folder: other Squirrel launcher refused'
+[IO.File]::WriteAllText("$hl\horizon-loader.exe", 'not a real exe')
+Assert (((& $setup -Action Check -Target $hl) -join "`n") -notmatch "launcher's own install folder") 'launcher folder: with horizon-loader.exe beside it, not refused'
+
 # 10. CollectLogs: one zip with logs, file list and Check output; user name scrubbed, binary config intact, install untouched
 $cl = Fixture 'collect logs'; Copy-Item "$xb\dgVoodoo.conf" "$cl\dgVoodoo.conf"; Copy-Item "$y\host64\deep-fried-chicken.addon64" "$cl\host64\"
 [IO.File]::WriteAllText("$cl\dlss5-feed.log", "host game: C:\Users\$env:USERNAME\Ashita\bootloader\xiloader.exe`r`n")

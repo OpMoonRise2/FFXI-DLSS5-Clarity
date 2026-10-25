@@ -80,6 +80,16 @@ if($Action -eq 'Restore'){
 }
 if(!@(Get-ChildItem -LiteralPath $root -File -Filter '*.exe').Count){throw 'Choose the folder containing the FFXI loader/game executable, not the launcher download directory.'}
 $problems=[Collections.Generic.List[string]]::new()
+# A launcher's own install folder (HorizonXI's %LOCALAPPDATA%\HorizonXI_Launcher, any Squirrel-installed launcher with
+# Update.exe and app-* folders) has executables but never starts the game, so an install there changes nothing in game
+# (2026-10-24 report). Refused only when no known FFXI loader is beside them: a folder with a custom loader still installs.
+$hasLoader=@('pol.exe','xiloader.exe','horizon-loader.exe','ashita-cli.exe','phoenix-loader.exe' | Where-Object {Test-Path -LiteralPath (Join-Path $root $_)}).Count -gt 0
+$horizonLauncher=Test-Path -LiteralPath (Join-Path $root 'HorizonXI-Launcher.exe')
+$squirrel=(Test-Path -LiteralPath (Join-Path $root 'Update.exe')) -and @(Get-ChildItem -LiteralPath $root -Directory -Filter 'app-*' -ErrorAction SilentlyContinue).Count -gt 0
+if(!$hasLoader -and ($horizonLauncher -or $squirrel)){
+    $hint=$(if($horizonLauncher){' For HorizonXI that is %LOCALAPPDATA%\HorizonXI\Game\bootloader, the folder holding horizon-loader.exe.'}else{''})
+    $problems.Add("$root is a launcher's own install folder, not the folder the game starts from, so nothing installed here would reach the game. Extract the package into the bootloader folder that holds the game loader (horizon-loader.exe, xiloader.exe, ashita-cli.exe or pol.exe) and run Check.cmd there.$hint")
+}
 # DLSS needs an NVIDIA RTX card (tensor cores): GTX, MX, AMD and Intel cards cannot run it, and users without one
 # crashed or got nothing after installing. Any RTX adapter counts (laptops also list their Intel/AMD graphics).
 # Refused only on a confirmed miss: when Windows cannot list the adapters (WMI broken, cmdlet missing), the
@@ -183,11 +193,22 @@ foreach($pair in @(@('d3d8.dll','dgVoodoo'),@('dxgi.dll','ReShade'),@('host64\dx
 }
 # dgVoodoo.conf: a text config set to anything but D3D11 FL11 is switched to it (backed up). Only the binary form,
 # which this script cannot edit safely, still needs dgVoodooCpl.exe.
-$dg=ReadText (SafePath $root 'dgVoodoo.conf');$dgFixed=$null
+# VRAM is the memory of dgVoodoo's emulated card: 256 MB when the key is missing. The 4096x4096 3D buffer this package
+# needs takes about 128 MB of that, and in a crowded zone FFXI's next dynamic vertex buffer no longer fits:
+# CreateVertexBuffer fails, FFXiMain does not check the result and crashes at ffximain.dll+0x43ee6 (2026-10-24 report,
+# RTX 5070 Ti, HorizonXI). Every played-on setup had 1-4 GB. A missing or smaller value is raised to 2048 MB (backed up);
+# a larger one is kept. Up to 1.3.1 the config written for a folder without one had no VRAM line at all.
+$dg=ReadText (SafePath $root 'dgVoodoo.conf');$dgFixed=$null;$dgApiFixed=$false;$dgVram=$null;$dgVramRaised=$false
+$minVram=1024;$setVram=2048
+function DgVram([string]$text){if($text -match '(?im)^\s*VRAM\s*=\s*(\d+)\s*(GB|MB)?\s*$'){$n=[int]$Matches[1];if($Matches[2] -eq 'GB'){$n*=1024};return $n};return $null}
 if($dg -and $dg -notmatch '(?im)^\s*OutputAPI\s*=\s*d3d11_fl11_0\s*$'){
-    if($dg -match '(?im)^\s*OutputAPI\s*='){$dgFixed=$dg -replace '(?im)^(\s*OutputAPI\s*=)[^\r\n]*','${1} d3d11_fl11_0'}
-    elseif($dg -match '(?im)^\s*\[General\]\s*$'){$dgFixed=SetIni $dg 'General' 'OutputAPI' 'd3d11_fl11_0'}
-    else{$problems.Add('dgVoodoo.conf is not a text config this installer can edit. Run dgVoodooCpl.exe, set Output API to "Direct3D 11 (feature level 11.0)" and MSAA off, Apply, then run Check.cmd again.')}
+    if($dg -match '(?im)^\s*OutputAPI\s*='){$dgFixed=$dg -replace '(?im)^(\s*OutputAPI\s*=)[^\r\n]*','${1} d3d11_fl11_0';$dgApiFixed=$true}
+    elseif($dg -match '(?im)^\s*\[General\]\s*$'){$dgFixed=SetIni $dg 'General' 'OutputAPI' 'd3d11_fl11_0';$dgApiFixed=$true}
+    else{$problems.Add('dgVoodoo.conf is not a text config this installer can edit. Run dgVoodooCpl.exe, set Output API to "Direct3D 11 (feature level 11.0)", MSAA off and VRAM 2048 MB (DirectX tab), Apply, then run Check.cmd again.')}
+}
+if($dg -and ($dgApiFixed -or $dg -match '(?im)^\s*OutputAPI\s*=\s*d3d11_fl11_0\s*$')){
+    $dgVram=DgVram $dg
+    if($null -eq $dgVram -or $dgVram -lt $minVram){$dgFixed=SetIni $(if($dgFixed){$dgFixed}else{$dg}) 'DirectX' 'VRAM' "$setVram";$dgVramRaised=$true}
 }
 $conflicts=@(Get-ChildItem -LiteralPath (Join-Path $root 'host64') -File -ErrorAction SilentlyContinue | Where-Object {$_.Name -match '^(renodx-dlss.*|deep-fried-chicken.*)\.addon64$'})
 foreach($c in $conflicts){$problems.Add("host64\$($c.Name) is another neural consumer (RenoDX / Deep Fried Chicken) and would fight OptiScaler for the neural pass. Move it out of host64 (put it back to switch back), then run Check.cmd again.")}
@@ -275,12 +296,12 @@ if(Test-Path -LiteralPath (Join-Path $root 'pol.exe')){
     elseif($fromReg){$problems.Add("$root is PlayOnline's install folder, but the FINAL FANTASY XI folder (FFXiMain.dll) was not found beside it or in the registry. Start FFXI from PlayOnline once so it finishes updating, then run Check.cmd again.")}
 }
 if($retail){
-    $isWindows={param($p) (Get-Item -LiteralPath $p).VersionInfo.ProductName -match 'Microsoft'}
-    $ddraw=@('DDraw.dll','D3DImm.dll' | Where-Object {(Test-Path -LiteralPath (Join-Path $root $_)) -and !(& $isWindows (Join-Path $root $_))})
+    $isMsDll={param($p) (Get-Item -LiteralPath $p).VersionInfo.ProductName -match 'Microsoft'}
+    $ddraw=@('DDraw.dll','D3DImm.dll' | Where-Object {(Test-Path -LiteralPath (Join-Path $root $_)) -and !(& $isMsDll (Join-Path $root $_))})
     if($ddraw.Count){$problems.Add("$($ddraw -join ' and ') beside pol.exe $(if($ddraw.Count -gt 1){'are'}else{'is'}) DirectDraw wrapper code (for example dgVoodoo's). It puts ReShade into the PlayOnline menus, and pol.exe then crashes when PlayOnline starts FFXI. Move $($ddraw -join ' and ') out of $root (keep them to switch back), then run Check.cmd again.")}
     foreach($n in 'd3d9.dll','dxgi.dll','d3d11.dll','version.dll','dinput8.dll'){
         $p=Join-Path $retail.Game $n
-        if((Test-Path -LiteralPath $p) -and !(& $isWindows $p)){$problems.Add("$n in $($retail.Game) belongs to another graphics mod (for example DXVK, ReShade or DLSS Enabler) and takes over FFXI's rendering there. Move it out of that folder (keep it to switch back), then run Check.cmd again.")}
+        if((Test-Path -LiteralPath $p) -and !(& $isMsDll $p)){$problems.Add("$n in $($retail.Game) belongs to another graphics mod (for example DXVK, ReShade or DLSS Enabler) and takes over FFXI's rendering there. Move it out of that folder (keep it to switch back), then run Check.cmd again.")}
     }
     $gd=Join-Path $retail.Game 'd3d8.dll'
     if(Test-Path -LiteralPath $gd){
@@ -317,7 +338,9 @@ if($retail){
         if($retail.BgW -eq $retail.W -and $retail.BgH -eq $retail.H){Write-Output "WARNING: FFXI's background resolution equals the window size ($($retail.W)x$($retail.H)), so the Shader Toggler cannot tell the 3D scene from the screen (blinking characters). Set a larger background resolution; see README.md, Retail."}
     }
 }
-if($dgFixed){Write-Output 'dgVoodoo.conf is not set to Direct3D 11 feature level 11: Install sets OutputAPI = d3d11_fl11_0 (backed up). Phoenix launcher rewrites this file every launch: set its graphics output to D3D11 there too.'}
+if($dgApiFixed){Write-Output 'dgVoodoo.conf is not set to Direct3D 11 feature level 11: Install sets OutputAPI = d3d11_fl11_0 (backed up). Phoenix launcher rewrites this file every launch: set its graphics output to D3D11 there too.'}
+if($dgVramRaised){Write-Output "dgVoodoo.conf gives FFXI $(if($null -eq $dgVram){'no VRAM setting, so dgVoodoo''s default of 256 MB'}else{"$dgVram MB"}) of video memory, too little next to the 4096x4096 3D buffer (crashes in crowded zones, ffximain.dll 0x43ee6): Install sets VRAM = $setVram (backed up)."}
+if(!$dg){Write-Output "No dgVoodoo.conf yet: Install writes one (Direct3D 11 feature level 11, VRAM = $setVram MB)."}
 Write-Output 'File prerequisites passed. GPU, driver and live rendering still require the host test and gameplay check.'
 if($reuseShaders){
     if($staleFeed){Write-Output 'Existing reshade-shaders\Shaders\DLSS5_Feed.fx is from another Feeder release: Install replaces it (backed up) so it matches the shipped dlss5-feed.addon32.'}
@@ -404,7 +427,7 @@ if($win){
 }
 $changes['ReShade.ini']=@{Text=$rs}
 if($dgFixed){$changes['dgVoodoo.conf']=@{Text=$dgFixed}}
-if(!$dg){$changes['dgVoodoo.conf']=@{Text="[General]`r`nOutputAPI=d3d11_fl11_0`r`nFullScreenMode=false`r`n[DirectX]`r`nResolution=unforced`r`ndgVoodooWatermark=false`r`n"}}
+if(!$dg){$changes['dgVoodoo.conf']=@{Text="[General]`r`nOutputAPI=d3d11_fl11_0`r`nFullScreenMode=false`r`n[DirectX]`r`nVRAM=$setVram`r`nResolution=unforced`r`ndgVoodooWatermark=false`r`n"}}
 # Retail: the same dgVoodoo and configuration beside FFXiMain.dll, where the game resolves d3d8.dll.
 $gameChanges=@{}
 if($retail){
