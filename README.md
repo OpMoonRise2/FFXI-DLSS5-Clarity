@@ -64,7 +64,7 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.3.1\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.3.2\`.
    On Windower 4 that is the folder your Windower profile starts the game from: the folder holding its loader
    on a private server, or the PlayOnline folder holding `pol.exe` on retail (see [Windower 4](#windower-4)).
    On retail started from PlayOnline or Steam, it is the PlayOnline folder holding `pol.exe` (see
@@ -111,8 +111,8 @@ Retail works when started straight from PlayOnline or Steam (played on Steam ret
 terms for the official servers prohibit third-party tools that modify the client: see the notice at the top.
 
 1. Close FFXI and PlayOnline. Extract the package into the PlayOnline folder that holds `pol.exe`, for example
-   `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.1\` or, on Steam,
-   `...\steamapps\common\FFXINA\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.1\`.
+   `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.2\` or, on Steam,
+   `...\steamapps\common\FFXINA\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.2\`.
 2. Run `Check.cmd`, then `Install.cmd`, as in [Install](#install). It recognises the PlayOnline folder (from
    the registry, or the `FINAL FANTASY XI` folder beside it) and says so.
 
@@ -152,7 +152,7 @@ Windower 4 works on private servers and on retail. Close the Windower launcher a
   Windower folder it is found by itself: run `Check.cmd` and `Install.cmd` as usual. Otherwise pass Windower's
   folder: `Install.cmd -Windower "D:\Games\Windower4"`.
 - **Retail:** your profile starts `pol.exe`, so extract the package into the PlayOnline folder that holds it
-  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.1\`)
+  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.2\`)
   and pass Windower's folder: `Check.cmd -Windower "C:\Windower4"`, then `Install.cmd -Windower "C:\Windower4"`.
   The installer finds `pol.exe` the way Windower does (beside Windower, then PlayOnline's install folder).
 
@@ -215,13 +215,15 @@ It works only inside the bootloader folder it is pointed at (by default, the boo
     logarithmic at 0) unless the orientation is already decided there: FFXI's depth is not reversed, and
     ReShade assumes reversed when nothing says otherwise. If there is none, it writes a minimal one (F5
     overlay, preset `FFXI-Clarity.ini`).
-  - `dgVoodoo.conf`: written if missing (Direct3D 11, no watermark); an existing one set to another output API
-    (for example D3D12) gets `OutputAPI = d3d11_fl11_0`, everything else kept.
+  - `dgVoodoo.conf`: written if missing (Direct3D 11, `VRAM=2048`, no watermark); an existing one set to another
+    output API (for example D3D12) gets `OutputAPI = d3d11_fl11_0`, and one with no `VRAM` or less than 1 GB gets
+    `VRAM=2048`. Everything else is kept, and so is a `VRAM` of 1 GB or more.
 - **Backups:** every file it replaces goes to `FFXI-Clarity-backup-<id>\` with a receipt. `Restore.cmd` puts
   them back and moves the files it added aside; it stops if anything changed since the install.
 - **It refuses, and writes nothing,** when Windows reports no NVIDIA RTX card, FFXI or the helper is running, `d3d8.dll` / `dxgi.dll` belong to
   another wrapper (not dgVoodoo / ReShade), `dgVoodoo.conf` is in dgVoodoo's binary format, another neural
-  consumer (RenoDX, Deep Fried Chicken) is in `host64\`, the NVIDIA DLLs are missing, or a package file fails
+  consumer (RenoDX, Deep Fried Chicken) is in `host64\`, the NVIDIA DLLs are missing, the folder is a launcher's
+  own install folder rather than the game's bootloader (for example `HorizonXI_Launcher`), or a package file fails
   its hash check. Each `NEEDED:` line in `Check.cmd` names the file and what to do.
 - **Windower 4 only:** the profile values in [Windower 4](#windower-4), in Windower's `settings.xml`.
 - **Retail PlayOnline only:** `d3d8.dll` and `dgVoodoo.conf` in the `FINAL FANTASY XI` folder too (backed up
@@ -260,6 +262,17 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.3.2** (installer, tests and README; same binaries and settings as 1.3.1): **fixes crashes in crowded zones.**
+  Found on HorizonXI with an RTX 5070 Ti on 2026-10-24: the game closed after anything from under a minute to an hour
+  where many players stood around, with `ffximain.dll` and fault offset `0x00043ee6` in `crashes.txt`.
+  - dgVoodoo gives the game an emulated graphics card whose memory is the `VRAM` setting in `dgVoodoo.conf`, and
+    256 MB when that setting is missing. The `dgVoodoo.conf` that Clarity wrote for a folder without one (every
+    version up to 1.3.1) had no `VRAM` line. The 4096x4096 3D buffer Clarity needs takes about half of 256 MB;
+    with many characters nearby, creating one more vertex buffer fails, FFXI does not check that and crashes.
+  - The installer now writes `VRAM=2048`, and raises a missing or smaller value below 1 GB to 2048 (backed up,
+    restorable). A `VRAM` of 1 GB or more is kept. `Check.cmd` says what it found.
+  - A launcher's own install folder (HorizonXI's `HorizonXI_Launcher`, or any launcher with `Update.exe` and
+    `app-*` folders) is refused: the game never starts from there, so an install there changed nothing in game.
 - **1.3.1** (installer, tests and README; same binaries and settings as 1.3.0): **retail PlayOnline / Steam.**
   Started from PlayOnline or Steam without a loader, retail either crashed right after "Play Online" or ran
   without ReShade. Found on Steam retail on 2026-10-22, and played there after the fix:
@@ -408,6 +421,14 @@ Logs: `bootloader\dlss5-feed.log` (game side), `bootloader\host64\dlss5-feed-hos
   dgVoodoo 2.87.2, which Clarity 1.2.0-1.2.9 shipped. It crashes while the game creates its device on some
   RTX 50 PCs, notably with a second graphics adapter. Install 1.3.0 or newer, which ships dgVoodoo 2.87.5. On
   Phoenix this also stops the installer replacing Phoenix's own 2.87.5 with the older build.
+- **The game closes after playing a while, often where many players stand around, and `crashes.txt` names
+  `ffximain.dll` with fault offset `0x00043ee6`.** dgVoodoo's emulated graphics card ran out of memory: FFXI could
+  not create a vertex buffer and crashed when it used it. Run 1.3.2's `Install.cmd`, which sets `VRAM=2048` in
+  `dgVoodoo.conf`. By hand: close the game, open `bootloader\dgVoodoo.conf` in Notepad and put `VRAM=2048` on the
+  line under `[DirectX]` (or change the existing `VRAM` line). Your graphics card's own memory is not the limit.
+- **`Check.cmd` says the folder is a launcher's own install folder.** You extracted the package where the launcher
+  app lives (on HorizonXI, `%LOCALAPPDATA%\HorizonXI_Launcher`). The game starts from its bootloader folder: on
+  HorizonXI `%LOCALAPPDATA%\HorizonXI\Game\bootloader`, the folder holding `horizon-loader.exe`. Extract it there.
 - **The game crashes or closes on launch.** First run `Restore.cmd` if you need to play now: it puts your previous
   files back. Then, one at a time:
   1. Run `bootloader\host64\dlss5-feed-host64.exe --test`. Anything but `300/300 evaluates succeeded` points at
