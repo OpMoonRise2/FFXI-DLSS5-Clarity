@@ -88,7 +88,18 @@ $horizonLauncher=Test-Path -LiteralPath (Join-Path $root 'HorizonXI-Launcher.exe
 $squirrel=(Test-Path -LiteralPath (Join-Path $root 'Update.exe')) -and @(Get-ChildItem -LiteralPath $root -Directory -Filter 'app-*' -ErrorAction SilentlyContinue).Count -gt 0
 if(!$hasLoader -and ($horizonLauncher -or $squirrel)){
     $hint=$(if($horizonLauncher){' For HorizonXI that is %LOCALAPPDATA%\HorizonXI\Game\bootloader, the folder holding horizon-loader.exe.'}else{''})
-    $problems.Add("$root is a launcher's own install folder, not the folder the game starts from, so nothing installed here would reach the game. Extract the package into the bootloader folder that holds the game loader (horizon-loader.exe, xiloader.exe, ashita-cli.exe or pol.exe) and run Check.cmd there.$hint")
+    $problems.Add("$root is a launcher's own install folder, not the folder the game starts from, so nothing installed here would reach the game. Extract the package into the bootloader folder that holds the game loader (horizon-loader.exe, xiloader.exe, phoenix-loader.exe or pol.exe) and run Check.cmd there.$hint")
+}
+# An Ashita root (Ashita-cli.exe, Ashita.dll, addons\, config\, bootloader\) also has an executable, but the game process
+# is the loader in its bootloader\ folder, which loads ReShade and dgVoodoo from there. An install in the root passed
+# every check and the host self-test, and the game ran with no effect (2026-11-03 report, #20, installed four times).
+# Refused only on strong evidence: no game loader in the target itself, and one in the target's own bootloader\ folder.
+# Nothing is redirected or moved: the message names the folder to extract into.
+$gameLoaders=@('pol.exe','xiloader.exe','horizon-loader.exe','phoenix-loader.exe')
+$nestedBoot=Join-Path $root 'bootloader'
+if(!@($gameLoaders | Where-Object {Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf}).Count -and (Test-Path -LiteralPath $nestedBoot -PathType Container)){
+    $nestedLoaders=@($gameLoaders | Where-Object {Test-Path -LiteralPath (Join-Path $nestedBoot $_) -PathType Leaf})
+    if($nestedLoaders.Count){$problems.Add("This is the Ashita / launcher root folder, not the game's bootloader folder: $root. The game starts from $nestedBoot\ (it holds $($nestedLoaders -join ', ')), so nothing installed here would reach the game. Extract the FFXI-DLSS5-Clarity-$($manifest.Version) folder inside $nestedBoot\ and run Check.cmd and Install.cmd from there.")}
 }
 # DLSS needs an NVIDIA RTX card (tensor cores): GTX, MX, AMD and Intel cards cannot run it, and users without one
 # crashed or got nothing after installing. Any RTX adapter counts (laptops also list their Intel/AMD graphics).

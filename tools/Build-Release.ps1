@@ -20,7 +20,7 @@
 #>
 param(
     [Parameter(Mandatory)][string]$StackDir,
-    [string]$Version = '1.3.2',
+    [string]$Version = '1.3.3',
     [string]$ForkCommit = ''
 )
 $ErrorActionPreference = 'Stop'
