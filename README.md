@@ -64,7 +64,7 @@ dgVoodoo's licence only allows shipping it with a mod for a particular game. For
 ## Install
 
 1. Close FFXI. Download the release zip and extract the `FFXI-DLSS5-Clarity-<version>` folder
-   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.3.2\`.
+   **directly inside** your client's `bootloader` folder, e.g. `Ashita\bootloader\FFXI-DLSS5-Clarity-1.3.3\`.
    On Windower 4 that is the folder your Windower profile starts the game from: the folder holding its loader
    on a private server, or the PlayOnline folder holding `pol.exe` on retail (see [Windower 4](#windower-4)).
    On retail started from PlayOnline or Steam, it is the PlayOnline folder holding `pol.exe` (see
@@ -111,8 +111,8 @@ Retail works when started straight from PlayOnline or Steam (played on Steam ret
 terms for the official servers prohibit third-party tools that modify the client: see the notice at the top.
 
 1. Close FFXI and PlayOnline. Extract the package into the PlayOnline folder that holds `pol.exe`, for example
-   `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.2\` or, on Steam,
-   `...\steamapps\common\FFXINA\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.2\`.
+   `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.3\` or, on Steam,
+   `...\steamapps\common\FFXINA\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.3\`.
 2. Run `Check.cmd`, then `Install.cmd`, as in [Install](#install). It recognises the PlayOnline folder (from
    the registry, or the `FINAL FANTASY XI` folder beside it) and says so.
 
@@ -152,7 +152,7 @@ Windower 4 works on private servers and on retail. Close the Windower launcher a
   Windower folder it is found by itself: run `Check.cmd` and `Install.cmd` as usual. Otherwise pass Windower's
   folder: `Install.cmd -Windower "D:\Games\Windower4"`.
 - **Retail:** your profile starts `pol.exe`, so extract the package into the PlayOnline folder that holds it
-  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.2\`)
+  (for example `C:\Program Files (x86)\PlayOnline\SquareEnix\PlayOnlineViewer\FFXI-DLSS5-Clarity-1.3.3\`)
   and pass Windower's folder: `Check.cmd -Windower "C:\Windower4"`, then `Install.cmd -Windower "C:\Windower4"`.
   The installer finds `pol.exe` the way Windower does (beside Windower, then PlayOnline's install folder).
 
@@ -262,6 +262,15 @@ Frame generation (e.g. Lossless Scaling) is separate and not configured by this 
 
 ## Changes
 
+- **1.3.3** (installer, tests and README; same binaries and settings as 1.3.2): **refuses the Ashita root folder.**
+  Extracted into the Ashita root (the folder with `Ashita-cli.exe`, `addons\`, `config\` and `bootloader\`) instead
+  of `bootloader\`, 1.3.2 passed `Check.cmd`, `Install.cmd` and the host self-test, but the game, which starts from
+  `bootloader\`, never loaded anything: it ran with no DLSS or neural effect
+  ([#20](https://github.com/OpMoonRise2/FFXI-DLSS5-Clarity/issues/20)). `Check.cmd` and `Install.cmd` now refuse a
+  folder that holds no game loader itself while its `bootloader\` folder does (`xiloader.exe`, `horizon-loader.exe`,
+  `phoenix-loader.exe` or `pol.exe`), before anything is written, and name the folder to extract into. Nothing is moved
+  for you. If you installed into the Ashita root before, those files do nothing in game; see
+  [Reporting a problem](#reporting-a-problem) if you want help removing them.
 - **1.3.2** (installer, tests and README; same binaries and settings as 1.3.1): **fixes crashes in crowded zones.**
   Found on HorizonXI with an RTX 5070 Ti on 2026-10-24: the game closed after anything from under a minute to an hour
   where many players stood around, with `ffximain.dll` and fault offset `0x00043ee6` in `crashes.txt`.

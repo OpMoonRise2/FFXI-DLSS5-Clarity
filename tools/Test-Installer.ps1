@@ -219,6 +219,42 @@ Assert (((& $setup -Action Check -Target $sq) -join "`n") -match "NEEDED: .* is 
 [IO.File]::WriteAllText("$hl\horizon-loader.exe", 'not a real exe')
 Assert (((& $setup -Action Check -Target $hl) -join "`n") -notmatch "launcher's own install folder") 'launcher folder: with horizon-loader.exe beside it, not refused'
 
+# 9d. An Ashita root (Ashita-cli.exe, addons\, config\, plugins\, bootloader\ holding the game loader) is not where the
+#     game starts: an install there passed Check, Install and the host test and the game ran with no effect (2026-11-03,
+#     #20). Refused before any write, naming the bootloader folder; Install is refused without Check having run first.
+function AshitaRoot($n, $loader) {
+    $p = Fixture $n; [IO.File]::WriteAllText("$p\Ashita-cli.exe", 'not a real exe'); [IO.File]::WriteAllText("$p\Ashita.dll", 'not a real dll')
+    foreach ($dir in 'addons','config','plugins','scripts','bootloader') { New-Item -ItemType Directory "$p\$dir" -Force | Out-Null }
+    if ($loader) { [IO.File]::WriteAllText("$p\bootloader\$loader", 'not a real exe') }
+    $p
+}
+# Every file with its size, time and hash, and every folder by name (NTFS updates a folder's own time lazily).
+function Listing($p) { (Get-ChildItem -LiteralPath $p -Recurse -Force | Sort-Object FullName | ForEach-Object { if ($_.PSIsContainer) { "D|$($_.FullName)" } else { "F|$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)|$(Hash $_.FullName)" } }) -join "`n" }
+$ar = AshitaRoot 'caldera root' 'xiloader.exe'; $before = Listing $ar
+$refused = $false; $err = ''; try { & $setup -Action Install -Target $ar | Out-Null } catch { $refused = $true; $err = "$_" }
+Assert ($refused -and $err -match 'No installation files changed') 'ashita root: Install run directly (no Check first) is refused'
+Assert ((Listing $ar) -eq $before -and !(Test-Path "$ar\host64\winmm.dll") -and !(Get-ChildItem $ar -Directory -Filter 'FFXI-Clarity-backup-*')) 'ashita root: no file written, no backup folder made'
+$chk = (& $setup -Action Check -Target $ar) -join "`n"
+Assert ($chk -match "NEEDED: This is the Ashita / launcher root folder, not the game's bootloader folder: " + [regex]::Escape($ar) + '\.') 'ashita root: Check names the root folder'
+Assert ($chk -match ('The game starts from ' + [regex]::Escape("$ar\bootloader\") + ' \(it holds xiloader\.exe\).*Extract the FFXI-DLSS5-Clarity-\S+ folder inside ' + [regex]::Escape("$ar\bootloader\"))) 'ashita root: Check names the nested bootloader and what to do'
+Assert ((Listing $ar) -eq $before) 'ashita root: Check wrote nothing'
+$hr = AshitaRoot 'horizon game root' 'horizon-loader.exe'
+Assert (((& $setup -Action Check -Target $hr) -join "`n") -match "NEEDED: This is the Ashita / launcher root.*it holds horizon-loader\.exe") 'ashita root: HorizonXI Game folder (horizon-loader.exe in bootloader) refused too'
+# The right folder: the same layout's bootloader\ installs normally.
+$ab = Join-Path $ar 'bootloader'; New-Item -ItemType Directory "$ab\host64" -Force | Out-Null
+foreach ($d in 'nvngx_dlss.dll','nvngx_dlssnr.dll') { Copy-Item (Join-Path $NvidiaDir $d) "$ab\host64\$d" }
+$chk = (& $setup -Action Check -Target $ab) -join "`n"
+Assert ($chk -notmatch 'NEEDED' -and $chk -match 'File prerequisites passed') 'ashita bootloader: Check passes'
+& $setup -Action Install -Target $ab | Out-Null
+Assert ((Test-Path "$ab\host64\winmm.dll") -and (Test-Path "$ab\dxgi.dll") -and @(Get-ChildItem $ab -Directory -Filter 'FFXI-Clarity-backup-*').Count -eq 1) 'ashita bootloader: installs'
+# Not enough evidence, not refused: a nested bootloader\ without a known loader, and a target that holds its own loader.
+$amb = AshitaRoot 'ashita root unknown loader' 'custom-loader.exe'
+Assert (((& $setup -Action Check -Target $amb) -join "`n") -notmatch 'launcher root folder') 'ashita root: nested bootloader without a known loader is not refused'
+$own = Fixture 'loader with nested bootloader'; [IO.File]::WriteAllText("$own\xiloader.exe", 'not a real exe'); New-Item -ItemType Directory "$own\bootloader" -Force | Out-Null; [IO.File]::WriteAllText("$own\bootloader\xiloader.exe", 'not a real exe')
+Assert (((& $setup -Action Check -Target $own) -join "`n") -notmatch 'launcher root folder') 'ashita root: a target holding its own loader is not refused'
+$bare = Fixture 'no bootloader folder'; [IO.File]::WriteAllText("$bare\Ashita-cli.exe", 'not a real exe')
+Assert (((& $setup -Action Check -Target $bare) -join "`n") -notmatch 'launcher root folder') 'ashita root: no bootloader\ folder, not refused (unchanged behaviour)'
+
 # 10. CollectLogs: one zip with logs, file list and Check output; user name scrubbed, binary config intact, install untouched
 $cl = Fixture 'collect logs'; Copy-Item "$xb\dgVoodoo.conf" "$cl\dgVoodoo.conf"; Copy-Item "$y\host64\deep-fried-chicken.addon64" "$cl\host64\"
 [IO.File]::WriteAllText("$cl\dlss5-feed.log", "host game: C:\Users\$env:USERNAME\Ashita\bootloader\xiloader.exe`r`n")
